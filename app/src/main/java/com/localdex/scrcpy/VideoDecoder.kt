@@ -50,6 +50,14 @@ class VideoDecoder(
     private var videoHeight = 0
     private var needsReconfigure = false
 
+    /**
+     * Last SPS/PPS payload seen. Config packets only arrive at the start of a
+     * capture session, so if the codec has to be dropped while no surface is
+     * attached (see [hasUsableSurface]), this lets it be rebuilt once a surface
+     * returns without waiting for the server to resend one.
+     */
+    private var pendingConfigPayload: ByteArray? = null
+
     private val readerThread = Thread({ runReader() }, "localdex-video")
 
     fun start() {
@@ -75,7 +83,13 @@ class VideoDecoder(
     /** The viewer's surface is going away; keep decoding but stop rendering. */
     fun clearSurface() {
         renderEnabled = false
+        // The Surface itself is being destroyed by the caller right after this,
+        // so drop the reference — using it later (e.g. to configure a codec on
+        // a resolution change) would throw against an already-released Surface.
+        surface = null
     }
+
+    private fun hasUsableSurface(): Boolean = surface?.isValid == true
 
     fun stop() {
         running = false
@@ -126,14 +140,35 @@ class VideoDecoder(
                 if (isConfig) {
                     // Config packets (SPS/PPS) open every capture session; this is the
                     // safe moment to (re)create the codec.
+                    pendingConfigPayload = payload
                     surfaceLatch.await()
                     if (codec == null || needsReconfigure) {
-                        recreateCodec()
-                        needsReconfigure = false
+                        if (hasUsableSurface()) {
+                            recreateCodec()
+                            needsReconfigure = false
+                        } else {
+                            // No surface to configure against right now (viewer
+                            // backgrounded). Drop any stale-size codec instead of
+                            // crashing; needsReconfigure stays set so this is
+                            // retried below once a surface returns.
+                            releaseCodec()
+                        }
                     }
-                    submit(payload, 0, MediaCodec.BUFFER_FLAG_CODEC_CONFIG)
-                } else if (codec != null) {
-                    submit(payload, ptsAndFlags and PTS_MASK, 0)
+                    if (codec != null) {
+                        submit(payload, 0, MediaCodec.BUFFER_FLAG_CODEC_CONFIG)
+                    }
+                } else {
+                    if (codec == null && needsReconfigure && hasUsableSurface()) {
+                        val config = pendingConfigPayload
+                        if (config != null) {
+                            recreateCodec()
+                            needsReconfigure = false
+                            submit(config, 0, MediaCodec.BUFFER_FLAG_CODEC_CONFIG)
+                        }
+                    }
+                    if (codec != null) {
+                        submit(payload, ptsAndFlags and PTS_MASK, 0)
+                    }
                 }
             }
         } catch (e: Exception) {
@@ -165,6 +200,14 @@ class VideoDecoder(
             if (index >= 0) {
                 val buffer = currentCodec.getInputBuffer(index) ?: continue
                 buffer.clear()
+                if (data.size > buffer.remaining()) {
+                    // Bigger than the codec's negotiated input buffer (an unusually
+                    // large frame). Drop it rather than overflow, but still hand the
+                    // buffer back so the codec doesn't starve for input buffers.
+                    Log.w(TAG, "Dropping oversized frame: ${data.size}B > ${buffer.remaining()}B buffer")
+                    currentCodec.queueInputBuffer(index, 0, 0, ptsUs, flags)
+                    return
+                }
                 buffer.put(data)
                 currentCodec.queueInputBuffer(index, 0, data.size, ptsUs, flags)
                 return

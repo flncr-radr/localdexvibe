@@ -43,9 +43,28 @@ class ScrcpySession(
         private const val CONNECT_RETRIES = 40
         private const val CONNECT_RETRY_DELAY_MS = 250L
 
+        /** Guards read-check-then-write access to [current] from [startIfNeeded] and [stop]. */
+        private val lock = Any()
+
         /** The one live session, owned by DexService. */
         @Volatile
         var current: ScrcpySession? = null
+            private set
+
+        /**
+         * Starts a new session and installs it as [current], unless one is already
+         * running. Safe to call concurrently: at most one session is ever created for
+         * overlapping calls.
+         */
+        fun startIfNeeded(context: Context, displaySpec: String): ScrcpySession {
+            synchronized(lock) {
+                current?.let { return it }
+                val session = ScrcpySession(context, displaySpec)
+                current = session
+                session.start()
+                return session
+            }
+        }
     }
 
     private val _state = MutableStateFlow<State>(State.Starting("Connecting…"))
@@ -266,6 +285,13 @@ class ScrcpySession(
     fun stop(error: String? = null) {
         if (!stopped.compareAndSet(false, true)) return
 
+        // Clear `current` synchronously (not from the async cleanup below) so a
+        // start() racing right after stop() never sees a session that is already
+        // committed to stopping.
+        synchronized(lock) {
+            if (current === this@ScrcpySession) current = null
+        }
+
         scope.launch {
             videoDecoder?.stop()
             controller?.stop()
@@ -285,7 +311,6 @@ class ScrcpySession(
             }
 
             _state.value = State.Stopped(error)
-            if (current === this@ScrcpySession) current = null
             scope.cancel()
         }
     }

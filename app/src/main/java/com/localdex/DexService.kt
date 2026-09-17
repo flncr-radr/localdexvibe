@@ -14,6 +14,7 @@ import androidx.core.content.ContextCompat
 import com.localdex.scrcpy.ScrcpySession
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.collectLatest
@@ -26,6 +27,11 @@ import kotlinx.coroutines.launch
 class DexService : Service() {
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+
+    // The collector for the currently-observed session's state. Tracked so a repeated
+    // onStartCommand (e.g. a re-tap before the UI reflects the running state) cancels
+    // the previous collector instead of piling up another one alongside it.
+    private var stateCollectorJob: Job? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
@@ -44,7 +50,8 @@ class DexService : Service() {
                 if (session == null) {
                     shutDown()
                 } else {
-                    serviceScope.launch {
+                    stateCollectorJob?.cancel()
+                    stateCollectorJob = serviceScope.launch {
                         session.state.collectLatest { state ->
                             when (state) {
                                 is ScrcpySession.State.Stopped -> shutDown()
@@ -124,14 +131,9 @@ class DexService : Service() {
         const val ACTION_STOP = "com.localdex.STOP_DEX"
 
         fun start(context: Context) {
-            if (ScrcpySession.current == null) {
-                val session = ScrcpySession(
-                    context.applicationContext,
-                    Prefs.getDisplaySpec(context),
-                )
-                ScrcpySession.current = session
-                session.start()
-            }
+            // Synchronized in ScrcpySession itself, so overlapping calls (e.g. a
+            // double-tap on "Start DeX") can never create two sessions.
+            ScrcpySession.startIfNeeded(context.applicationContext, Prefs.getDisplaySpec(context))
             ContextCompat.startForegroundService(context, Intent(context, DexService::class.java))
         }
 

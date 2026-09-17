@@ -1,0 +1,659 @@
+<title>DeX RTL Test Pass</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<style>
+  :root{
+    --bg:#f6f7f9;
+    --surface:#ffffff;
+    --surface-2:#eef0f4;
+    --border:#dfe3ea;
+    --text:#151a22;
+    --text-muted:#5b6472;
+    --accent:#2f6fed;
+    --accent-weak:#e8f0ff;
+    --good:#1f9d55;
+    --good-weak:#e7f7ee;
+    --warn:#b45309;
+    --warn-weak:#fdf1e0;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#0f1216;
+      --surface:#171b21;
+      --surface-2:#1d222a;
+      --border:#2a3038;
+      --text:#e7eaef;
+      --text-muted:#8b94a3;
+      --accent:#6d97f5;
+      --accent-weak:#1b2740;
+      --good:#3ecb7e;
+      --good-weak:#123322;
+      --warn:#e0a548;
+      --warn-weak:#3a2a12;
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#0f1216;
+    --surface:#171b21;
+    --surface-2:#1d222a;
+    --border:#2a3038;
+    --text:#e7eaef;
+    --text-muted:#8b94a3;
+    --accent:#6d97f5;
+    --accent-weak:#1b2740;
+    --good:#3ecb7e;
+    --good-weak:#123322;
+    --warn:#e0a548;
+    --warn-weak:#3a2a12;
+  }
+
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--text);
+    font-family:"IBM Plex Sans",system-ui,sans-serif;
+    padding:0 16px 48px;
+  }
+  code, .mono{
+    font-family:"IBM Plex Mono",monospace;
+  }
+
+  header.top{
+    position:sticky;
+    top:env(safe-area-inset-top,0px);
+    z-index:5;
+    background:var(--bg);
+    padding-top:calc(20px + env(safe-area-inset-top,0px));
+    padding-bottom:14px;
+    border-bottom:1px solid var(--border);
+    margin-bottom:24px;
+  }
+  .wrap{max-width:760px;margin:0 auto;}
+  h1{
+    font-size:1.4rem;
+    font-weight:700;
+    margin:0 0 4px;
+    letter-spacing:-0.01em;
+  }
+  .subtitle{
+    color:var(--text-muted);
+    font-size:0.88rem;
+    margin:0 0 14px;
+  }
+  .progress-row{
+    display:flex;
+    align-items:center;
+    gap:12px;
+  }
+  .progress-track{
+    flex:1;
+    height:8px;
+    border-radius:99px;
+    background:var(--surface-2);
+    overflow:hidden;
+  }
+  .progress-fill{
+    height:100%;
+    background:var(--accent);
+    border-radius:99px;
+    width:0%;
+    transition:width .25s ease;
+  }
+  .progress-label{
+    font-size:0.82rem;
+    color:var(--text-muted);
+    white-space:nowrap;
+    min-width:64px;
+    text-align:right;
+    font-family:"IBM Plex Mono",monospace;
+  }
+  .toolbar{
+    display:flex;
+    gap:8px;
+    margin-top:12px;
+    flex-wrap:wrap;
+  }
+  button.reset{
+    font:inherit;
+    font-size:0.8rem;
+    color:var(--text-muted);
+    background:var(--surface);
+    border:1px solid var(--border);
+    border-radius:8px;
+    padding:6px 12px;
+    cursor:pointer;
+  }
+  button.reset:hover{border-color:var(--accent);color:var(--accent);}
+
+  .logcat-chip{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    background:var(--surface-2);
+    border:1px solid var(--border);
+    border-radius:8px;
+    padding:8px 10px;
+    font-size:0.78rem;
+    color:var(--text-muted);
+    margin-top:12px;
+  }
+  .logcat-chip code{
+    flex:1;
+    color:var(--text);
+    overflow-x:auto;
+    white-space:nowrap;
+  }
+  .logcat-chip button{
+    font:inherit;
+    font-size:0.72rem;
+    border:1px solid var(--border);
+    background:var(--surface);
+    color:var(--text-muted);
+    border-radius:6px;
+    padding:4px 8px;
+    cursor:pointer;
+    flex-shrink:0;
+  }
+
+  section.group{
+    background:var(--surface);
+    border:1px solid var(--border);
+    border-radius:12px;
+    margin-bottom:16px;
+    overflow:hidden;
+  }
+  .group-head{
+    display:flex;
+    align-items:baseline;
+    justify-content:space-between;
+    gap:12px;
+    padding:14px 16px;
+    border-bottom:1px solid var(--border);
+    background:var(--surface-2);
+  }
+  .group-head h2{
+    font-size:0.95rem;
+    font-weight:600;
+    margin:0;
+  }
+  .group-head .count{
+    font-family:"IBM Plex Mono",monospace;
+    font-size:0.76rem;
+    color:var(--text-muted);
+    white-space:nowrap;
+  }
+  .group-note{
+    padding:10px 16px 0;
+    font-size:0.82rem;
+    color:var(--text-muted);
+  }
+
+  ul.items{list-style:none;margin:0;padding:0;}
+  li.item{
+    padding:14px 16px;
+    border-bottom:1px solid var(--border);
+    display:flex;
+    gap:12px;
+    align-items:flex-start;
+  }
+  li.item:last-child{border-bottom:none;}
+  li.item.checked{background:var(--good-weak);}
+
+  input[type="checkbox"]{
+    width:20px;
+    height:20px;
+    margin:2px 0 0;
+    accent-color:var(--good);
+    flex-shrink:0;
+    cursor:pointer;
+  }
+  .item-body{flex:1;min-width:0;}
+  .item-title{
+    font-weight:600;
+    font-size:0.92rem;
+    margin:0 0 4px;
+    cursor:pointer;
+  }
+  li.item.checked .item-title{
+    color:var(--text-muted);
+    text-decoration:line-through;
+    text-decoration-color:var(--good);
+  }
+  .item-steps{
+    font-size:0.85rem;
+    color:var(--text-muted);
+    margin:0 0 6px;
+    line-height:1.5;
+  }
+  .item-pass{
+    font-size:0.85rem;
+    line-height:1.5;
+    margin:0;
+  }
+  .item-pass b{
+    color:var(--good);
+    font-weight:600;
+  }
+  .item-flag{
+    display:inline-block;
+    font-size:0.68rem;
+    font-weight:600;
+    letter-spacing:.03em;
+    text-transform:uppercase;
+    color:var(--warn);
+    background:var(--warn-weak);
+    border-radius:5px;
+    padding:2px 6px;
+    margin-left:8px;
+    vertical-align:middle;
+  }
+  .item-note{
+    display:block;
+    margin-top:6px;
+    font-size:0.78rem;
+    color:var(--text-muted);
+    font-style:italic;
+  }
+
+  footer{
+    max-width:760px;
+    margin:24px auto 0;
+    font-size:0.78rem;
+    color:var(--text-muted);
+    text-align:center;
+  }
+</style>
+
+<header class="top">
+  <div class="wrap">
+    <h1>DeX RTL Test Pass</h1>
+    <p class="subtitle">LocalDex on Samsung Remote Test Lab — check off items as you go, state is remembered on this device.</p>
+    <div class="progress-row">
+      <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+      <div class="progress-label" id="progressLabel">0 / 0</div>
+    </div>
+    <div class="toolbar">
+      <button class="reset" id="resetBtn">Reset all checkmarks</button>
+    </div>
+    <div class="logcat-chip">
+      <code>adb logcat -s ScrcpySession:* VideoDecoder:* DexService:* AndroidRuntime:E</code>
+      <button id="copyLogcat">Copy</button>
+    </div>
+  </div>
+</header>
+
+<main class="wrap" id="groups"></main>
+
+<footer>Checkbox state is stored only in this browser (localStorage) — it won't sync across devices or reach anyone else.</footer>
+
+<script>
+(function(){
+  var DATA = [
+    {
+      id: "setup",
+      title: "1. First-time setup & pairing",
+      items: [
+        {
+          t: "Enable Developer options",
+          steps: "Settings → About phone → Software information → tap Build number 7×.",
+          pass: "Developer options appears in Settings."
+        },
+        {
+          t: "Grant notifications when LocalDex asks",
+          steps: "Open LocalDex, allow the notification permission prompt.",
+          pass: "Notifications are enabled for LocalDex (needed for the pairing-code reply)."
+        },
+        {
+          t: "Pair via Wireless debugging",
+          steps: "Tap Start Pairing → in Developer options, Wireless debugging → Pair device with pairing code → type the 6-digit code into LocalDex's notification reply.",
+          pass: "LocalDex shows the connected/ready state, no error toast.",
+          flag: "mDNS-sensitive"
+        },
+        {
+          t: "Relaunch LocalDex after pairing",
+          steps: "Kill the app fully, reopen it.",
+          pass: "It goes straight back to the ready state without re-pairing — confirms the self-granted WRITE_SECURE_SETTINGS + auto-reconnect works."
+        }
+      ]
+    },
+    {
+      id: "golden",
+      title: "2. Golden path — starting a DeX session",
+      items: [
+        {
+          t: "Start DeX",
+          steps: "Pick a display spec (default is fine) and tap Start DeX.",
+          pass: "The \"LocalDex is running\" notification appears and the viewer opens."
+        },
+        {
+          t: "Display id resolves",
+          steps: "Watch the status text / notification.",
+          pass: "A display id shows within a couple seconds — it doesn't hang on \"starting…\"."
+        },
+        {
+          t: "Launch an app on the desktop",
+          steps: "Open any app from inside the DeX viewer.",
+          pass: "It opens as a movable, resizable window with a drag-handle — not fullscreen with no controls."
+        },
+        {
+          t: "Move a window",
+          steps: "One-finger drag on a window's handle.",
+          pass: "The window moves."
+        },
+        {
+          t: "Resize a window",
+          steps: "One-finger drag on a window's edge/corner.",
+          pass: "The window resizes."
+        },
+        {
+          t: "Scroll inside an app",
+          steps: "Two-finger scroll on a scrollable list.",
+          pass: "It scrolls the list, rather than dragging/selecting."
+        },
+        {
+          t: "Minimize / maximize",
+          steps: "Tap the window's handle to open its menu, try both.",
+          pass: "Both work as expected."
+        },
+        {
+          t: "Back gesture/button",
+          steps: "Use Back while interacting with an app on the desktop.",
+          pass: "Back is forwarded into DeX; you stay in the viewer."
+        },
+        {
+          t: "Split-screen quirk (expected, not a bug)",
+          steps: "Try the handle menu's Split-screen option.",
+          pass: "It affects the phone's own screen, not the DeX display — this is documented existing behavior, just confirm it still holds.",
+          note: "docs/TECHNICAL.md — known quirk"
+        }
+      ]
+    },
+    {
+      id: "lifecycle-basic",
+      title: "3. Session lifecycle",
+      items: [
+        {
+          t: "Background with Home",
+          steps: "Press Home while a session is running.",
+          pass: "The session keeps running — notification stays."
+        },
+        {
+          t: "Reattach via notification",
+          steps: "Tap the LocalDex notification to reopen the viewer.",
+          pass: "Video resumes instantly, apps are where you left them."
+        },
+        {
+          t: "Stop via ✕ button",
+          steps: "Tap the close button in the viewer, confirm.",
+          pass: "Session ends, notification disappears."
+        },
+        {
+          t: "Stop via notification while viewer is closed",
+          steps: "Background/close the viewer, then use the notification's Stop action.",
+          pass: "The session still ends fully — this is meant to be the guaranteed stop path."
+        }
+      ]
+    },
+    {
+      id: "fix-races",
+      title: "4. Regression — start/stop race fix",
+      note: "Exercises the synchronized ScrcpySession.startIfNeeded()/stop() fix.",
+      items: [
+        {
+          t: "Double-tap Start DeX",
+          steps: "Tap Start DeX twice as fast as you can.",
+          pass: "Only one session starts — one notification, one \"New display\" line in logcat."
+        },
+        {
+          t: "Stop then immediately Start",
+          steps: "Tap Stop, then tap Start again before the notification clears.",
+          pass: "A fresh session actually starts (a new display id appears in logcat) — not a silent no-op."
+        }
+      ]
+    },
+    {
+      id: "fix-freeform",
+      title: "5. Regression — freeform-forcing retry",
+      note: "Exercises the retrying forceFreeform() + freeformForceFailed warning.",
+      items: [
+        {
+          t: "Freeform takes effect promptly",
+          steps: "Watch logcat right after starting a session.",
+          pass: "\"Forced freeform on display N\" appears within ~1.5s of \"Virtual display id: N\"."
+        },
+        {
+          t: "Windows actually render freeform",
+          steps: "Same check as golden-path item 2.3.",
+          pass: "Apps open with drag-handle decor, not fullscreen."
+        },
+        {
+          t: "Warning path (only if freeform ever fails)",
+          steps: "If you ever see \"Giving up forcing freeform\" in logcat, check the app UI.",
+          pass: "MainActivity's status text shows the ⚠️ warning, or the viewer shows a Toast — the failure is surfaced, not silent.",
+          note: "Hard to force deliberately — just keep an eye out."
+        }
+      ]
+    },
+    {
+      id: "fix-resize",
+      title: "6. Regression — resize while backgrounded",
+      note: "The most important one — exercises the VideoDecoder surface/reconfigure fix.",
+      items: [
+        {
+          t: "Background, then resize",
+          steps: "Open the viewer, confirm video renders, press Home, then rotate the device (or fold/unfold) while backgrounded. Check logcat for a new \"Video session: WxH\" line with different dimensions.",
+          pass: "Reopening LocalDex resumes video within a couple seconds — no crash, no \"Session ended\" dialog."
+        },
+        {
+          t: "Plain backgrounding (no resize) still works",
+          steps: "Background and reopen the viewer without rotating in between.",
+          pass: "Video resumes instantly — decoding continued the whole time in the background."
+        }
+      ]
+    },
+    {
+      id: "fix-oversize",
+      title: "7. Regression — oversized-frame guard",
+      note: "Hard to trigger on demand; this is a soak check.",
+      items: [
+        {
+          t: "Heavy motion content for a few minutes",
+          steps: "Play a busy video or fast-scroll something on the DeX desktop while watching logcat.",
+          pass: "Either \"Dropping oversized frame\" never appears, or if it does, the session keeps running right after — no crash."
+        }
+      ]
+    },
+    {
+      id: "foldable",
+      title: "8. Foldable-specific — new ground, no prior baseline",
+      note: "First time this is testable on real hardware — record what actually happens, there's no known-correct answer yet.",
+      items: [
+        {
+          t: "Fold while a session is running",
+          steps: "Start DeX unfolded, then fold the device.",
+          pass: "Session keeps running without crashing.",
+          note: "Note what actually happens to the viewer — expected behavior isn't defined yet."
+        },
+        {
+          t: "Unfold again",
+          steps: "Unfold back.",
+          pass: "Viewer/session recovers cleanly, no crash, no stuck black screen."
+        },
+        {
+          t: "Repeat fold/unfold a few times in a row",
+          steps: "Cycle folded ↔ unfolded 3-4 times with a session running.",
+          pass: "No crash, no stuck black screen across repeated cycles — stress-tests fix #6 above."
+        }
+      ]
+    },
+    {
+      id: "cleanup",
+      title: "9. Cleanup",
+      items: [
+        {
+          t: "Stop and uninstall",
+          steps: "Stop any running session, then uninstall LocalDex.",
+          pass: "Clean uninstall, no leftover notification."
+        }
+      ]
+    }
+  ];
+
+  var STORAGE_KEY = "dex-rtl-checklist-v1";
+
+  function loadState(){
+    try {
+      return JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
+    } catch(e) { return {}; }
+  }
+  function saveState(state){
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch(e) {}
+  }
+
+  var state = loadState();
+  var groupsEl = document.getElementById("groups");
+  var totalItems = 0;
+
+  DATA.forEach(function(group){
+    var section = document.createElement("section");
+    section.className = "group";
+
+    var head = document.createElement("div");
+    head.className = "group-head";
+    var h2 = document.createElement("h2");
+    h2.textContent = group.title;
+    var count = document.createElement("span");
+    count.className = "count";
+    count.id = "count-" + group.id;
+    head.appendChild(h2);
+    head.appendChild(count);
+    section.appendChild(head);
+
+    if (group.note) {
+      var noteEl = document.createElement("div");
+      noteEl.className = "group-note";
+      noteEl.textContent = group.note;
+      section.appendChild(noteEl);
+    }
+
+    var ul = document.createElement("ul");
+    ul.className = "items";
+
+    group.items.forEach(function(item, idx){
+      totalItems++;
+      var itemId = group.id + "-" + idx;
+      var li = document.createElement("li");
+      li.className = "item";
+      if (state[itemId]) li.classList.add("checked");
+
+      var checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.checked = !!state[itemId];
+      checkbox.id = "chk-" + itemId;
+
+      var body = document.createElement("div");
+      body.className = "item-body";
+
+      var titleEl = document.createElement("label");
+      titleEl.className = "item-title";
+      titleEl.htmlFor = checkbox.id;
+      titleEl.textContent = item.t;
+      if (item.flag) {
+        var flag = document.createElement("span");
+        flag.className = "item-flag";
+        flag.textContent = item.flag;
+        titleEl.appendChild(flag);
+      }
+
+      var stepsEl = document.createElement("p");
+      stepsEl.className = "item-steps";
+      stepsEl.textContent = item.steps;
+
+      var passEl = document.createElement("p");
+      passEl.className = "item-pass";
+      var b = document.createElement("b");
+      b.textContent = "Pass: ";
+      passEl.appendChild(b);
+      passEl.appendChild(document.createTextNode(item.pass));
+
+      body.appendChild(titleEl);
+      body.appendChild(stepsEl);
+      body.appendChild(passEl);
+
+      if (item.note) {
+        var itemNote = document.createElement("span");
+        itemNote.className = "item-note";
+        itemNote.textContent = item.note;
+        body.appendChild(itemNote);
+      }
+
+      checkbox.addEventListener("change", function(){
+        state[itemId] = checkbox.checked;
+        li.classList.toggle("checked", checkbox.checked);
+        saveState(state);
+        updateProgress();
+        updateGroupCount(group.id);
+      });
+
+      li.appendChild(checkbox);
+      li.appendChild(body);
+      ul.appendChild(li);
+    });
+
+    section.appendChild(ul);
+    groupsEl.appendChild(section);
+    updateGroupCount(group.id);
+  });
+
+  function groupCounts(groupId){
+    var group = DATA.find(function(g){ return g.id === groupId; });
+    var total = group.items.length;
+    var done = 0;
+    group.items.forEach(function(_, idx){
+      if (state[groupId + "-" + idx]) done++;
+    });
+    return { done: done, total: total };
+  }
+
+  function updateGroupCount(groupId){
+    var c = groupCounts(groupId);
+    var el = document.getElementById("count-" + groupId);
+    if (el) el.textContent = c.done + " / " + c.total;
+  }
+
+  function updateProgress(){
+    var done = Object.keys(state).filter(function(k){ return state[k]; }).length;
+    var pct = totalItems ? Math.round((done / totalItems) * 100) : 0;
+    document.getElementById("progressFill").style.width = pct + "%";
+    document.getElementById("progressLabel").textContent = done + " / " + totalItems;
+  }
+
+  document.getElementById("resetBtn").addEventListener("click", function(){
+    if (!confirm("Clear all checkmarks?")) return;
+    state = {};
+    saveState(state);
+    document.querySelectorAll("input[type=checkbox]").forEach(function(cb){ cb.checked = false; });
+    document.querySelectorAll("li.item").forEach(function(li){ li.classList.remove("checked"); });
+    DATA.forEach(function(g){ updateGroupCount(g.id); });
+    updateProgress();
+  });
+
+  document.getElementById("copyLogcat").addEventListener("click", function(btn){
+    var cmd = "adb logcat -s ScrcpySession:* VideoDecoder:* DexService:* AndroidRuntime:E";
+    var el = document.getElementById("copyLogcat");
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(cmd).then(function(){
+        var old = el.textContent;
+        el.textContent = "Copied";
+        setTimeout(function(){ el.textContent = old; }, 1200);
+      }).catch(function(){});
+    }
+  });
+
+  updateProgress();
+})();
+</script>

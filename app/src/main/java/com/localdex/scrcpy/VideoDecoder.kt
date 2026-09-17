@@ -53,8 +53,8 @@ class VideoDecoder(
     /**
      * Last SPS/PPS payload seen. Config packets only arrive at the start of a
      * capture session, so if the codec has to be dropped while no surface is
-     * attached (see [hasUsableSurface]), this lets it be rebuilt once a surface
-     * returns without waiting for the server to resend one.
+     * attached (see [usableSurfaceSnapshot]), this lets it be rebuilt once a
+     * surface returns without waiting for the server to resend one.
      */
     private var pendingConfigPayload: ByteArray? = null
 
@@ -89,7 +89,13 @@ class VideoDecoder(
         surface = null
     }
 
-    private fun hasUsableSurface(): Boolean = surface?.isValid == true
+    /**
+     * A stable reference to the currently attached surface, or null if none is
+     * attached/valid right now. Callers must configure the codec against this same
+     * reference rather than re-reading [surface] later — the field can be nulled out
+     * by [clearSurface] on the UI thread at any time.
+     */
+    private fun usableSurfaceSnapshot(): Surface? = surface?.takeIf { it.isValid }
 
     fun stop() {
         running = false
@@ -143,25 +149,27 @@ class VideoDecoder(
                     pendingConfigPayload = payload
                     surfaceLatch.await()
                     if (codec == null || needsReconfigure) {
-                        if (hasUsableSurface()) {
-                            recreateCodec()
+                        val snapshot = usableSurfaceSnapshot()
+                        if (snapshot != null && recreateCodec(snapshot)) {
                             needsReconfigure = false
                         } else {
                             // No surface to configure against right now (viewer
-                            // backgrounded). Drop any stale-size codec instead of
-                            // crashing; needsReconfigure stays set so this is
-                            // retried below once a surface returns.
+                            // backgrounded), or it died mid-reconfigure. Drop any
+                            // stale-size codec instead of crashing; needsReconfigure
+                            // is (re)set so this is retried below once a surface
+                            // returns.
                             releaseCodec()
+                            needsReconfigure = true
                         }
                     }
                     if (codec != null) {
                         submit(payload, 0, MediaCodec.BUFFER_FLAG_CODEC_CONFIG)
                     }
                 } else {
-                    if (codec == null && needsReconfigure && hasUsableSurface()) {
+                    if (codec == null && needsReconfigure) {
                         val config = pendingConfigPayload
-                        if (config != null) {
-                            recreateCodec()
+                        val snapshot = usableSurfaceSnapshot()
+                        if (config != null && snapshot != null && recreateCodec(snapshot)) {
                             needsReconfigure = false
                             submit(config, 0, MediaCodec.BUFFER_FLAG_CODEC_CONFIG)
                         }
@@ -181,16 +189,28 @@ class VideoDecoder(
         }
     }
 
-    private fun recreateCodec() {
+    /**
+     * Rebuilds the codec against [surface]. Returns false (leaving codec == null) if
+     * that surface died in the narrow window between the caller's usability check and
+     * this call — the caller retries once a fresh surface arrives.
+     */
+    private fun recreateCodec(surface: Surface): Boolean {
         releaseCodec()
 
         val format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, videoWidth, videoHeight)
         val newCodec = MediaCodec.createDecoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
-        newCodec.configure(format, surface, null, 0)
-        newCodec.start()
+        try {
+            newCodec.configure(format, surface, null, 0)
+            newCodec.start()
+        } catch (e: Exception) {
+            Log.w(TAG, "Surface became invalid while (re)creating the codec", e)
+            newCodec.release()
+            return false
+        }
         codec = newCodec
 
         outputThread = Thread({ drainOutput(newCodec) }, "localdex-video-out").also { it.start() }
+        return true
     }
 
     private fun submit(data: ByteArray, ptsUs: Long, flags: Int) {

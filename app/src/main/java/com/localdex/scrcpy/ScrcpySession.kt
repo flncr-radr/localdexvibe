@@ -332,12 +332,12 @@ class ScrcpySession(
 
     /** Idempotent; safe from any thread. Tears everything down, then reports [error]. */
     fun stop(error: String? = null) {
-        if (!stopped.compareAndSet(false, true)) return
-
-        // Clear `current` synchronously (not from the async cleanup below) so a
-        // start() racing right after stop() never sees a session that is already
-        // committed to stopping.
+        // The stopped-check and clearing `current` must be one atomic step under
+        // the same lock startIfNeeded() uses — otherwise a start() on another
+        // thread can slip in between them and be handed a session that has
+        // already committed to stopping.
         synchronized(lock) {
+            if (!stopped.compareAndSet(false, true)) return
             if (current === this@ScrcpySession) current = null
         }
 

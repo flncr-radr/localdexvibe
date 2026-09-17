@@ -43,6 +43,10 @@ class ScrcpySession(
         private const val CONNECT_RETRIES = 40
         private const val CONNECT_RETRY_DELAY_MS = 250L
 
+        private const val WINDOWING_MODE_FREEFORM = 5
+        private const val FREEFORM_FORCE_ATTEMPTS = 5
+        private const val FREEFORM_FORCE_RETRY_DELAY_MS = 300L
+
         /** Guards read-check-then-write access to [current] from [startIfNeeded] and [stop]. */
         private val lock = Any()
 
@@ -99,10 +103,22 @@ class ScrcpySession(
     var displayId = -1
         private set
 
+    /**
+     * True once forcing freeform mode on [displayId] has been given up on after
+     * [FREEFORM_FORCE_ATTEMPTS] tries. Apps on the display open fullscreen with no
+     * window controls when this is true.
+     */
+    @Volatile
+    var freeformForceFailed = false
+        private set
+
     /** Tail of the server's stdout/stderr, kept for error reporting. */
     private val serverLog = StringBuilder()
 
     private val displayIdPattern = Regex("New display: .*\\(id=(\\d+)\\)")
+    // Device output for `wm get-display-windowing-mode` isn't a documented, stable
+    // format (some builds print the int, some the WINDOWING_MODE_* name) — match both.
+    private val freeformReplyPattern = Regex("\\bFREEFORM\\b|\\b$WINDOWING_MODE_FREEFORM\\b", RegexOption.IGNORE_CASE)
 
     fun start() {
         scope.launch {
@@ -232,11 +248,14 @@ class ScrcpySession(
                     val read = input.read(buffer)
                     if (read <= 0) break
                     val text = String(buffer, 0, read)
-                    synchronized(serverLog) {
+                    val snapshot = synchronized(serverLog) {
                         serverLog.append(text)
                         if (serverLog.length > 8192) serverLog.delete(0, serverLog.length - 8192)
+                        serverLog.toString()
                     }
-                    parseDisplayId(text)
+                    // Scan the accumulated buffer, not just this chunk: the "New
+                    // display" line can straddle two reads.
+                    parseDisplayId(snapshot)
                     Log.i(TAG, "[server] ${text.trim()}")
                 }
             } catch (e: IOException) {
@@ -245,31 +264,51 @@ class ScrcpySession(
         }, "localdex-server-log").start()
     }
 
-    private fun parseDisplayId(logChunk: String) {
+    private fun parseDisplayId(log: String) {
         if (displayId != -1) return
-        val id = displayIdPattern.find(logChunk)?.groupValues?.get(1)?.toIntOrNull() ?: return
+        val id = displayIdPattern.find(log)?.groupValues?.get(1)?.toIntOrNull() ?: return
         displayId = id
         Log.i(TAG, "Virtual display id: $id")
-
-        // Freeform is not activated on app-created virtual displays on this Android
-        // generation, but the per-display windowing mode (checked before all desktop
-        // mode heuristics in DisplayWindowSettings.getWindowingModeLocked) can simply
-        // be forced. Mode 5 = WINDOWING_MODE_FREEFORM.
-        scope.launch {
-            try {
-                val manager = this@ScrcpySession.manager ?: return@launch
-                Adb.runShell(manager, "wm set-display-windowing-mode -d $id 5")
-                val check = Adb.runShell(manager, "wm get-display-windowing-mode -d $id")
-                Log.i(TAG, "Windowing mode after force: $check")
-            } catch (e: Exception) {
-                Log.w(TAG, "Could not force freeform on display $id", e)
-            }
-        }
+        forceFreeform(id)
 
         // If video is already running, re-emit so observers pick up the id.
         val current = _state.value
         if (current is State.Running) {
             _state.value = current.copy(displayId = id)
+        }
+    }
+
+    /**
+     * Freeform is not activated on app-created virtual displays on this Android
+     * generation, but the per-display windowing mode (checked before all desktop
+     * mode heuristics in DisplayWindowSettings.getWindowingModeLocked) can simply
+     * be forced. The mode can flip back briefly while the display is still being
+     * registered, so this sets it, verifies it took, and retries a few times
+     * before giving up.
+     */
+    private fun forceFreeform(id: Int) {
+        scope.launch {
+            val manager = this@ScrcpySession.manager ?: return@launch
+            repeat(FREEFORM_FORCE_ATTEMPTS) { attempt ->
+                try {
+                    Adb.runShell(manager, "wm set-display-windowing-mode -d $id $WINDOWING_MODE_FREEFORM")
+                    val reply = Adb.runShell(manager, "wm get-display-windowing-mode -d $id")
+                    if (freeformReplyPattern.containsMatchIn(reply)) {
+                        Log.i(TAG, "Forced freeform on display $id (attempt ${attempt + 1}): $reply")
+                        return@launch
+                    }
+                    Log.w(TAG, "Display $id not yet freeform after attempt ${attempt + 1}: $reply")
+                } catch (e: Exception) {
+                    Log.w(TAG, "Could not force freeform on display $id (attempt ${attempt + 1})", e)
+                }
+                delay(FREEFORM_FORCE_RETRY_DELAY_MS)
+            }
+            freeformForceFailed = true
+            Log.e(
+                TAG,
+                "Giving up forcing freeform on display $id after $FREEFORM_FORCE_ATTEMPTS attempts; " +
+                    "apps will open fullscreen with no window controls"
+            )
         }
     }
 

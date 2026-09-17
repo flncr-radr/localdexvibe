@@ -114,11 +114,23 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showRunningState() {
-        val displayId = ScrcpySession.current?.displayId ?: -1
+        val session = ScrcpySession.current
+        val displayId = session?.displayId ?: -1
         statusText.text = if (displayId >= 0) {
-            "🖥️ DeX is running on display $displayId.\n\n" +
-                "From a computer on the same adb connection you can open the same " +
-                "desktop with:\n\nscrcpy --display-id=$displayId"
+            buildString {
+                append("🖥️ DeX is running on display $displayId.\n\n")
+                append("From a computer on the same adb connection you can open the same ")
+                append("desktop with:\n\nscrcpy --display-id=$displayId")
+                when {
+                    session?.freeformForceFailed == true -> append(
+                        "\n\n⚠️ Could not switch this display to freeform mode — apps may " +
+                            "open fullscreen with no window controls."
+                    )
+                    session?.freeformForceInProgress == true ->
+                        // The freeform result can land a moment after the display id does.
+                        statusText.postDelayed({ if (ScrcpySession.current === session) checkStatus() }, 500)
+                }
+            }
         } else {
             // The display id arrives from the server log moments after start.
             statusText.postDelayed({ if (ScrcpySession.current != null) checkStatus() }, 1000)

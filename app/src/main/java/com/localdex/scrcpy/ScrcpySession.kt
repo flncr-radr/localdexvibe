@@ -103,10 +103,16 @@ class ScrcpySession(
     var displayId = -1
         private set
 
+    /** True while [forceFreeform] is still trying (or hasn't started yet). */
+    @Volatile
+    var freeformForceInProgress = true
+        private set
+
     /**
      * True once forcing freeform mode on [displayId] has been given up on after
      * [FREEFORM_FORCE_ATTEMPTS] tries. Apps on the display open fullscreen with no
-     * window controls when this is true.
+     * window controls when this is true. Only meaningful once
+     * [freeformForceInProgress] is false.
      */
     @Volatile
     var freeformForceFailed = false
@@ -288,27 +294,31 @@ class ScrcpySession(
      */
     private fun forceFreeform(id: Int) {
         scope.launch {
-            val manager = this@ScrcpySession.manager ?: return@launch
-            repeat(FREEFORM_FORCE_ATTEMPTS) { attempt ->
-                try {
-                    Adb.runShell(manager, "wm set-display-windowing-mode -d $id $WINDOWING_MODE_FREEFORM")
-                    val reply = Adb.runShell(manager, "wm get-display-windowing-mode -d $id")
-                    if (freeformReplyPattern.containsMatchIn(reply)) {
-                        Log.i(TAG, "Forced freeform on display $id (attempt ${attempt + 1}): $reply")
-                        return@launch
+            try {
+                val manager = this@ScrcpySession.manager ?: return@launch
+                repeat(FREEFORM_FORCE_ATTEMPTS) { attempt ->
+                    try {
+                        Adb.runShell(manager, "wm set-display-windowing-mode -d $id $WINDOWING_MODE_FREEFORM")
+                        val reply = Adb.runShell(manager, "wm get-display-windowing-mode -d $id")
+                        if (freeformReplyPattern.containsMatchIn(reply)) {
+                            Log.i(TAG, "Forced freeform on display $id (attempt ${attempt + 1}): $reply")
+                            return@launch
+                        }
+                        Log.w(TAG, "Display $id not yet freeform after attempt ${attempt + 1}: $reply")
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Could not force freeform on display $id (attempt ${attempt + 1})", e)
                     }
-                    Log.w(TAG, "Display $id not yet freeform after attempt ${attempt + 1}: $reply")
-                } catch (e: Exception) {
-                    Log.w(TAG, "Could not force freeform on display $id (attempt ${attempt + 1})", e)
+                    delay(FREEFORM_FORCE_RETRY_DELAY_MS)
                 }
-                delay(FREEFORM_FORCE_RETRY_DELAY_MS)
+                freeformForceFailed = true
+                Log.e(
+                    TAG,
+                    "Giving up forcing freeform on display $id after $FREEFORM_FORCE_ATTEMPTS attempts; " +
+                        "apps will open fullscreen with no window controls"
+                )
+            } finally {
+                freeformForceInProgress = false
             }
-            freeformForceFailed = true
-            Log.e(
-                TAG,
-                "Giving up forcing freeform on display $id after $FREEFORM_FORCE_ATTEMPTS attempts; " +
-                    "apps will open fullscreen with no window controls"
-            )
         }
     }
 

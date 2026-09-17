@@ -10,6 +10,7 @@ import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.ImageButton
 import android.widget.TextView
+import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.WindowCompat
@@ -17,6 +18,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.lifecycleScope
 import com.localdex.scrcpy.ScrcpySession
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
@@ -36,6 +38,7 @@ class ViewerActivity : AppCompatActivity() {
 
     private var surfaceReady = false
     private var surfaceGivenToDecoder = false
+    private var freeformWarningWatchStarted = false
 
     private val session: ScrcpySession?
         get() = ScrcpySession.current
@@ -102,6 +105,7 @@ class ViewerActivity : AppCompatActivity() {
                         statusText.visibility = View.GONE
                         applyAspectRatio(state.videoWidth, state.videoHeight)
                         offerSurface()
+                        watchFreeformResult()
                     }
                     is ScrcpySession.State.Stopped -> {
                         if (state.error != null) {
@@ -126,6 +130,27 @@ class ViewerActivity : AppCompatActivity() {
         val decoder = session?.videoDecoder ?: return
         decoder.setSurface(surfaceView.holder.surface)
         surfaceGivenToDecoder = true
+    }
+
+    /**
+     * Warns once, by Toast, if forcing freeform mode on this display fails — this is
+     * where the user actually notices apps opening fullscreen with no window
+     * controls, so it's worth flagging even though the DeX session itself is fine.
+     */
+    private fun watchFreeformResult() {
+        if (freeformWarningWatchStarted) return
+        freeformWarningWatchStarted = true
+        val activeSession = session ?: return
+        lifecycleScope.launch {
+            while (activeSession.freeformForceInProgress) delay(300)
+            if (activeSession.freeformForceFailed) {
+                Toast.makeText(
+                    this@ViewerActivity,
+                    "Couldn't switch to freeform mode — apps may open fullscreen.",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        }
     }
 
     /** Sizes the SurfaceView to exactly the video aspect ratio, centered. */

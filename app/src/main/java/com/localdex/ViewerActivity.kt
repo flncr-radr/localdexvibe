@@ -295,7 +295,7 @@ class ViewerActivity : AppCompatActivity() {
     }
 
     private fun toggleControlPanel() {
-        val hiddenOffset = (controlPanel.width - controlPanelGrip.width).toFloat()
+        val hiddenOffset = (controlPanel.width - controlPanelHandle.width).toFloat()
         controlPanelExpanded = !controlPanelExpanded
         controlPanel.animate().translationX(if (controlPanelExpanded) 0f else hiddenOffset).start()
     }

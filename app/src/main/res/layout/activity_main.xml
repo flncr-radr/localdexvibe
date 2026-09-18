@@ -311,5 +311,17 @@
             android:textAllCaps="false"
             android:textSize="14sp"
             android:text="Refresh Status" />
+
+        <!-- Always visible, whatever state the app is in above — a bug report is
+             just as likely to be about the setup checklist as the running session. -->
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/diagnosticsButton"
+            style="@style/Widget.MaterialComponents.Button.TextButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textAllCaps="false"
+            android:textSize="13sp"
+            android:textColor="@color/on_surface_variant"
+            android:text="Copy Diagnostics" />
     </LinearLayout>
 </ScrollView>

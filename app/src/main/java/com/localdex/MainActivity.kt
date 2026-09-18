@@ -1,6 +1,9 @@
 package com.localdex
 
 import android.Manifest
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
@@ -33,6 +36,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var startButton: Button
     private lateinit var viewerButton: Button
     private lateinit var stopButton: Button
+    private lateinit var diagnosticsButton: Button
 
     // Denial just means the setup checklist's notification step stays unchecked
     // (areNotificationsEnabled() already reflects it) and pairing discovery fails
@@ -56,6 +60,7 @@ class MainActivity : AppCompatActivity() {
         startButton = findViewById(R.id.startButton)
         viewerButton = findViewById(R.id.viewerButton)
         stopButton = findViewById(R.id.stopButton)
+        diagnosticsButton = findViewById(R.id.diagnosticsButton)
 
         val initialSpec = Prefs.getDisplaySpec(this)
         displaySpecField.setText(initialSpec)
@@ -90,6 +95,7 @@ class MainActivity : AppCompatActivity() {
             DexService.stop(this)
             statusText.postDelayed({ checkStatus() }, 500)
         }
+        diagnosticsButton.setOnClickListener { copyDiagnostics() }
 
         ensureRuntimePermissions()
     }
@@ -305,6 +311,22 @@ class MainActivity : AppCompatActivity() {
 
         DexService.start(this)
         startActivity(Intent(this, ViewerActivity::class.java))
+    }
+
+    /**
+     * Gathers a text diagnostics report and puts it on the clipboard. Runs on
+     * Dispatchers.IO: it does an ADB round-trip and shells out to `logcat`, neither
+     * of which belongs on the main thread.
+     */
+    private fun copyDiagnostics() {
+        diagnosticsButton.isEnabled = false
+        lifecycleScope.launch {
+            val report = withContext(Dispatchers.IO) { Diagnostics.collect(this@MainActivity) }
+            val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            clipboard.setPrimaryClip(ClipData.newPlainText("LocalDex diagnostics", report))
+            Toast.makeText(this@MainActivity, "Diagnostics copied", Toast.LENGTH_SHORT).show()
+            diagnosticsButton.isEnabled = true
+        }
     }
 
     private fun isDeveloperOptionsEnabled(): Boolean {

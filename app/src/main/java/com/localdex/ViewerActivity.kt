@@ -21,7 +21,6 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.lifecycleScope
-import com.google.android.material.bottomsheet.BottomSheetBehavior
 import com.localdex.scrcpy.ScrcpySession
 import com.localdex.scrcpy.WindowSnap
 import kotlinx.coroutines.delay
@@ -33,7 +32,7 @@ import kotlinx.coroutines.launch
  *
  * Touch and a real hardware/Bluetooth keyboard are both forwarded to the mirrored
  * display; the system Back gesture/button is forwarded as a DeX Back key. Closing
- * happens through the swipe-up panel's Stop button (with confirmation) or the
+ * happens through the side control tab's Stop button (with confirmation) or the
  * persistent notification's Stop action.
  */
 class ViewerActivity : AppCompatActivity() {
@@ -64,12 +63,15 @@ class ViewerActivity : AppCompatActivity() {
     private lateinit var surfaceView: SurfaceView
     private lateinit var statusText: TextView
     private lateinit var controlPanel: View
+    private lateinit var controlPanelGrip: View
     private lateinit var viewerStopButton: Button
     private lateinit var clipboardManager: ClipboardManager
 
     private var surfaceReady = false
     private var surfaceGivenToDecoder = false
     private var freeformWarningWatchStarted = false
+    private var controlPanelExpanded = false
+    private var controlPanelPositioned = false
 
     /**
      * The last text either sent to, or received from, the device's clipboard —
@@ -105,15 +107,14 @@ class ViewerActivity : AppCompatActivity() {
         surfaceView = findViewById(R.id.surfaceView)
         statusText = findViewById(R.id.viewerStatus)
         controlPanel = findViewById(R.id.controlPanel)
+        controlPanelGrip = findViewById(R.id.controlPanelGrip)
         viewerStopButton = findViewById(R.id.viewerStopButton)
         clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
 
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         hideSystemBars()
 
-        // Starts collapsed to the grip peeking at the bottom edge; drag it up to
-        // reveal the Stop button.
-        BottomSheetBehavior.from(controlPanel).state = BottomSheetBehavior.STATE_COLLAPSED
+        setupControlPanel()
         viewerStopButton.setOnClickListener { confirmStop() }
 
         surfaceView.holder.addCallback(object : SurfaceHolder.Callback {
@@ -248,6 +249,29 @@ class ViewerActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * Starts the panel collapsed to just the grip peeking from the right edge, and
+     * wires the tap-to-toggle. Position (not visibility) is driven by translationX,
+     * set once the panel has a measured width — it starts at 0 on the very first
+     * layout pass, so setting it any earlier would just get overwritten with 0.
+     */
+    private fun setupControlPanel() {
+        controlPanel.addOnLayoutChangeListener { view, _, _, _, _, _, _, _, _ ->
+            if (controlPanelPositioned) return@addOnLayoutChangeListener
+            val hiddenOffset = view.width - controlPanelGrip.width
+            if (hiddenOffset <= 0) return@addOnLayoutChangeListener
+            controlPanelPositioned = true
+            view.translationX = hiddenOffset.toFloat()
+        }
+        controlPanel.setOnClickListener { toggleControlPanel() }
+    }
+
+    private fun toggleControlPanel() {
+        val hiddenOffset = (controlPanel.width - controlPanelGrip.width).toFloat()
+        controlPanelExpanded = !controlPanelExpanded
+        controlPanel.animate().translationX(if (controlPanelExpanded) 0f else hiddenOffset).start()
+    }
+
     private fun confirmStop() {
         val displayId = session?.displayId ?: -1
         val displayNote = if (displayId >= 0) "\n\nVirtual display id: $displayId" else ""
@@ -317,7 +341,7 @@ class ViewerActivity : AppCompatActivity() {
     }
 
     // Forwarded to DeX instead of leaving the viewer; leaving is done via the
-    // swipe-up panel's Stop button, Home, or the notification. This is gesture
+    // side control tab's Stop button, Home, or the notification. This is gesture
     // nav's Back path specifically — it never reaches dispatchKeyEvent, since no
     // KeyEvent is generated for it.
     @Deprecated("Deprecated in Java")

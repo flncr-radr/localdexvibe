@@ -260,8 +260,8 @@ class ViewerActivity : AppCompatActivity() {
     }
 
     /**
-     * Starts the panel collapsed to just the 44dp handle peeking from the right
-     * edge, and wires the tap-to-toggle. Horizontal position (collapsed/expanded)
+     * Starts the panel collapsed to just the handle peeking from the right edge,
+     * and wires the tap-to-toggle. Horizontal position (collapsed/expanded)
      * is driven by translationX, set once the panel has a measured width — it
      * starts at 0 on the very first layout pass, so setting it any earlier would
      * just get overwritten with 0. Vertical position is re-applied on every layout

@@ -23,10 +23,16 @@
         android:text="Starting…" />
 
     <!--
-        Side control tab: a grip peeks from the right edge; tap it to reveal the
-        Stop button, tap again to hide it. Driven directly by translationX
+        Side control tab: a handle peeks from the right edge; tap it to reveal the
+        Restore/Stop buttons, tap again to hide it. Driven directly by translationX
         (see ViewerActivity.setupControlPanel) rather than BottomSheetBehavior —
         that wasn't reliably collapsing on first layout.
+
+        The handle (controlPanelHandle) is a full 44dp touch target, not just the
+        thin visual grip line inside it — a target as thin as the grip itself was
+        both hard to hit and easily lost to the system's edge-swipe gesture (see
+        setSystemGestureExclusionRects in ViewerActivity, which also carves this
+        handle's area out of that gesture entirely).
     -->
     <LinearLayout
         android:id="@+id/controlPanel"
@@ -36,32 +42,59 @@
         android:orientation="horizontal"
         android:gravity="center_vertical"
         android:background="@drawable/control_panel_bg"
-        android:paddingStart="10dp"
         android:paddingEnd="16dp"
         android:paddingVertical="16dp"
         android:clickable="true"
         android:focusable="true">
 
-        <View
-            android:id="@+id/controlPanelGrip"
-            android:layout_width="4dp"
-            android:layout_height="32dp"
-            android:layout_marginEnd="12dp"
-            android:background="@drawable/panel_grip" />
+        <FrameLayout
+            android:id="@+id/controlPanelHandle"
+            android:layout_width="44dp"
+            android:layout_height="72dp">
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/viewerStopButton"
-            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+            <View
+                android:id="@+id/controlPanelGrip"
+                android:layout_width="4dp"
+                android:layout_height="32dp"
+                android:layout_gravity="center"
+                android:background="@drawable/panel_grip" />
+        </FrameLayout>
+
+        <LinearLayout
             android:layout_width="wrap_content"
-            android:layout_height="48dp"
-            android:paddingHorizontal="20dp"
-            android:insetTop="0dp"
-            android:insetBottom="0dp"
-            app:cornerRadius="12dp"
-            app:strokeColor="@color/error"
-            android:textAllCaps="false"
-            android:textSize="14sp"
-            android:textColor="@color/error"
-            android:text="Stop DeX" />
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/viewerRestoreButton"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="wrap_content"
+                android:layout_height="48dp"
+                android:paddingHorizontal="20dp"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                app:cornerRadius="12dp"
+                app:strokeColor="@color/outline"
+                android:textAllCaps="false"
+                android:textSize="14sp"
+                android:textColor="@color/on_surface"
+                android:text="Restore Window" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/viewerStopButton"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="wrap_content"
+                android:layout_height="48dp"
+                android:layout_marginTop="8dp"
+                android:paddingHorizontal="20dp"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                app:cornerRadius="12dp"
+                app:strokeColor="@color/error"
+                android:textAllCaps="false"
+                android:textSize="14sp"
+                android:textColor="@color/error"
+                android:text="Stop DeX" />
+        </LinearLayout>
     </LinearLayout>
 </androidx.coordinatorlayout.widget.CoordinatorLayout>

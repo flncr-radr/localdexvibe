@@ -68,7 +68,8 @@ class ViewerActivity : AppCompatActivity() {
     private lateinit var surfaceView: SurfaceView
     private lateinit var statusText: TextView
     private lateinit var controlPanel: View
-    private lateinit var controlPanelGrip: View
+    private lateinit var controlPanelHandle: View
+    private lateinit var viewerRestoreButton: Button
     private lateinit var viewerStopButton: Button
     private lateinit var clipboardManager: ClipboardManager
 
@@ -112,7 +113,8 @@ class ViewerActivity : AppCompatActivity() {
         surfaceView = findViewById(R.id.surfaceView)
         statusText = findViewById(R.id.viewerStatus)
         controlPanel = findViewById(R.id.controlPanel)
-        controlPanelGrip = findViewById(R.id.controlPanelGrip)
+        controlPanelHandle = findViewById(R.id.controlPanelHandle)
+        viewerRestoreButton = findViewById(R.id.viewerRestoreButton)
         viewerStopButton = findViewById(R.id.viewerStopButton)
         clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
 
@@ -120,6 +122,7 @@ class ViewerActivity : AppCompatActivity() {
         hideSystemBars()
 
         setupControlPanel()
+        viewerRestoreButton.setOnClickListener { triggerSnap(WindowSnap.Direction.RESTORE) }
         viewerStopButton.setOnClickListener { confirmStop() }
 
         surfaceView.holder.addCallback(object : SurfaceHolder.Callback {
@@ -255,13 +258,19 @@ class ViewerActivity : AppCompatActivity() {
     }
 
     /**
-     * Starts the panel collapsed to just the grip peeking from the right edge, and
-     * wires the tap-to-toggle. Horizontal position (collapsed/expanded) is driven by
-     * translationX, set once the panel has a measured width — it starts at 0 on the
-     * very first layout pass, so setting it any earlier would just get overwritten
-     * with 0. Vertical position is re-applied on every layout change instead (fold/
-     * rotation can change root's height while the activity survives via
-     * configChanges), which is safe since it doesn't interact with the toggle state.
+     * Starts the panel collapsed to just the 44dp handle peeking from the right
+     * edge, and wires the tap-to-toggle. Horizontal position (collapsed/expanded)
+     * is driven by translationX, set once the panel has a measured width — it
+     * starts at 0 on the very first layout pass, so setting it any earlier would
+     * just get overwritten with 0. Vertical position is re-applied on every layout
+     * change instead (fold/rotation can change root's height while the activity
+     * survives via configChanges), which is safe since it doesn't interact with
+     * the toggle state.
+     *
+     * The handle's own bounds are also excluded from the system's edge-swipe
+     * gesture (setSystemGestureExclusionRects) — at the screen's edge, that
+     * gesture would otherwise compete with taps meant for the handle and can win,
+     * which is what made the earlier (thinner, 4dp) grip so hard to hit reliably.
      */
     private fun setupControlPanel() {
         val panelPositionFraction = Prefs.getPanelPositionFraction(this)
@@ -273,8 +282,11 @@ class ViewerActivity : AppCompatActivity() {
                 view.translationY = (0.5f - panelPositionFraction) * root.height
             }
 
+            controlPanelHandle.systemGestureExclusionRects =
+                listOf(android.graphics.Rect(0, 0, controlPanelHandle.width, controlPanelHandle.height))
+
             if (controlPanelPositioned) return@addOnLayoutChangeListener
-            val hiddenOffset = view.width - controlPanelGrip.width
+            val hiddenOffset = view.width - controlPanelHandle.width
             if (hiddenOffset <= 0) return@addOnLayoutChangeListener
             controlPanelPositioned = true
             view.translationX = hiddenOffset.toFloat()

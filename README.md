@@ -30,7 +30,7 @@ Pairing is one-time. After the first successful connection LocalDex grants itsel
 
 - **Display spec** is `WIDTHxHEIGHT/DPI` (default `1920x1440/240`). Lower DPI = more desktop room; higher DPI = bigger UI.
 - **Input is a virtual mouse**: one finger = click and drag (drag window handles to move windows), two fingers = scroll wheel. **Back** (gesture or key) is forwarded to DeX.
-- A grip peeks from the right edge — **tap it** to reveal the Stop button (with confirmation), tap again to hide it. Its vertical position (default 1/3 up from the bottom) is adjustable on the main screen under **Exit tab position**.
+- A 44dp handle peeks from the right edge — **tap it** to reveal **Restore Window** and **Stop** (with confirmation), tap again to hide it. The handle is excluded from the system's edge-swipe gesture so a swipe near it doesn't steal the tap. Its vertical position (default 1/3 up from the bottom) is adjustable on the main screen under **Exit tab position**.
 - Leave the viewer with Home; the session keeps running. Return (or stop) via the **LocalDex notification** — the notification's *Stop* action always ends the session, even if the viewer is gone.
 
 ## Viewing DeX from a computer
@@ -49,7 +49,7 @@ Alternatively, a computer can create its own DeX virtual display without LocalDe
 
 Apps open as floating windows with a **drag handle** at the top: drag the handle to move, drag edges to resize, tap the handle for minimize / maximize / split-screen. Known quirk: the **split-screen** option in the handle menu moves the app into split-screen on the phone's main screen, not on the DeX display.
 
-With a keyboard attached, **Meta+Left/Right** snaps the focused window to the left/right half of the display, **Meta+Up** maximizes it, and **Meta+Down** floats it to a centered window — Android's own desktop windowing has no shortcut for any of this (only the drag gestures above), so LocalDex drives it directly. **Meta+Down also fixes a window stuck fullscreen** on builds where the platform's own restore/un-maximize control doesn't actually shrink it back — it works by setting explicit bounds smaller than the display, which pulls the task out of fullscreen windowing regardless of what the built-in gesture does. Best-effort: it depends on `dumpsys`/`am` text output, not a stable API, so it can occasionally miss on some builds.
+With a keyboard attached, **Meta+Left/Right** snaps the focused window to the left/right half of the display, **Meta+Up** maximizes it, and **Meta+Down** floats it to a centered window — Android's own desktop windowing has no shortcut for any of this (only the drag gestures above), so LocalDex drives it directly. The same "float it" action is also the **Restore Window** button in the side tab, for when there's no keyboard handy or a specific keyboard's Meta key isn't detected. Either one fixes a window stuck fullscreen on builds where the platform's own restore/un-maximize control doesn't actually shrink it back — it works by setting explicit bounds smaller than the display, which pulls the task out of fullscreen windowing regardless of what the built-in gesture does. Best-effort: it depends on `dumpsys`/`am` text output, not a stable API, so it can occasionally miss on some builds.
 
 ## How it works
 

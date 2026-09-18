@@ -105,6 +105,73 @@
                 android:textStyle="bold"
                 android:letterSpacing="0.08" />
 
+            <HorizontalScrollView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="12dp"
+                android:scrollbars="none">
+
+                <com.google.android.material.button.MaterialButtonToggleGroup
+                    android:id="@+id/displaySpecPresetGroup"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    app:singleSelection="true"
+                    app:selectionRequired="false">
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/presetCompact"
+                        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="40dp"
+                        android:insetTop="0dp"
+                        android:insetBottom="0dp"
+                        app:strokeColor="@color/outline"
+                        android:textAllCaps="false"
+                        android:textSize="13sp"
+                        android:textColor="@color/on_surface"
+                        android:text="Compact" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/presetBalanced"
+                        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="40dp"
+                        android:insetTop="0dp"
+                        android:insetBottom="0dp"
+                        app:strokeColor="@color/outline"
+                        android:textAllCaps="false"
+                        android:textSize="13sp"
+                        android:textColor="@color/on_surface"
+                        android:text="Balanced" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/presetSpacious"
+                        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="40dp"
+                        android:insetTop="0dp"
+                        android:insetBottom="0dp"
+                        app:strokeColor="@color/outline"
+                        android:textAllCaps="false"
+                        android:textSize="13sp"
+                        android:textColor="@color/on_surface"
+                        android:text="Spacious" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/presetCustom"
+                        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="40dp"
+                        android:insetTop="0dp"
+                        android:insetBottom="0dp"
+                        app:strokeColor="@color/outline"
+                        android:textAllCaps="false"
+                        android:textSize="13sp"
+                        android:textColor="@color/on_surface"
+                        android:text="Custom" />
+                </com.google.android.material.button.MaterialButtonToggleGroup>
+            </HorizontalScrollView>
+
             <com.google.android.material.textfield.TextInputLayout
                 style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
                 android:layout_width="match_parent"

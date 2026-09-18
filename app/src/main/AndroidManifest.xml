@@ -7,6 +7,10 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
 
+    <!-- Covers both the PowerManager and WifiManager locks DexService holds so a
+         session survives the phone folding or its screen turning off. -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
     <!--
         Lets LocalDex switch Wireless debugging back on by itself. Not grantable at
         install time; the app grants it to itself over ADB once paired (see

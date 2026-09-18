@@ -11,6 +11,7 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.NotificationManagerCompat
 import androidx.lifecycle.lifecycleScope
+import com.google.android.material.button.MaterialButtonToggleGroup
 import com.localdex.scrcpy.ScrcpySession
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -22,6 +23,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var actionButton: Button
     private lateinit var refreshButton: Button
     private lateinit var configGroup: View
+    private lateinit var displaySpecPresetGroup: MaterialButtonToggleGroup
     private lateinit var displaySpecField: EditText
     private lateinit var startButton: Button
     private lateinit var viewerButton: Button
@@ -35,12 +37,25 @@ class MainActivity : AppCompatActivity() {
         actionButton = findViewById(R.id.actionButton)
         refreshButton = findViewById(R.id.refreshButton)
         configGroup = findViewById(R.id.configGroup)
+        displaySpecPresetGroup = findViewById(R.id.displaySpecPresetGroup)
         displaySpecField = findViewById(R.id.displaySpecField)
         startButton = findViewById(R.id.startButton)
         viewerButton = findViewById(R.id.viewerButton)
         stopButton = findViewById(R.id.stopButton)
 
-        displaySpecField.setText(Prefs.getDisplaySpec(this))
+        val initialSpec = Prefs.getDisplaySpec(this)
+        displaySpecField.setText(initialSpec)
+        // Reflect whatever's actually in the field: one of the named presets if it
+        // matches exactly, Custom otherwise (a previously typed value, most likely).
+        displaySpecPresetGroup.check(
+            DISPLAY_SPEC_PRESETS.entries.find { it.value == initialSpec }?.key ?: R.id.presetCustom
+        )
+        displaySpecPresetGroup.addOnButtonCheckedListener { _, checkedId, isChecked ->
+            if (!isChecked) return@addOnButtonCheckedListener
+            // presetCustom has no mapped spec; selecting it just leaves the field as
+            // it is, ready for manual editing.
+            DISPLAY_SPEC_PRESETS[checkedId]?.let { spec -> displaySpecField.setText(spec) }
+        }
 
         refreshButton.setOnClickListener { checkStatus(forceCheck = true) }
         startButton.setOnClickListener { startDex() }
@@ -270,5 +285,17 @@ class MainActivity : AppCompatActivity() {
 
         // Only try the self-grant once per session.
         private var permissionGrantAttempted = false
+
+        /**
+         * Named display-spec shortcuts for the preset row. Unverified on real
+         * hardware which of these actually looks best on a given screen — they're
+         * starting points, not measured values. presetCustom is deliberately
+         * unmapped: it just leaves the field open for manual entry.
+         */
+        private val DISPLAY_SPEC_PRESETS = mapOf(
+            R.id.presetCompact to "1600x1200/280",
+            R.id.presetBalanced to Prefs.DEFAULT_DISPLAY_SPEC,
+            R.id.presetSpacious to "2560x1600/220",
+        )
     }
 }

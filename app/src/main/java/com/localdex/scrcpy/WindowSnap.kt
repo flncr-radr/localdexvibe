@@ -31,7 +31,7 @@ import io.github.muntashirakon.adb.AbsAdbConnectionManager
 object WindowSnap {
     private const val TAG = "WindowSnap"
 
-    enum class Direction { LEFT, RIGHT, MAXIMIZE }
+    enum class Direction { LEFT, RIGHT, MAXIMIZE, RESTORE }
 
     suspend fun snap(
         manager: AbsAdbConnectionManager,
@@ -60,6 +60,17 @@ object WindowSnap {
             Direction.LEFT -> intArrayOf(0, 0, displayWidth / 2, displayHeight)
             Direction.RIGHT -> intArrayOf(displayWidth / 2, 0, displayWidth, displayHeight)
             Direction.MAXIMIZE -> intArrayOf(0, 0, displayWidth, displayHeight)
+            // A centered, explicitly-bounded rect — not full-display — since setting
+            // bounds smaller than the display is what pulls a task out of fullscreen
+            // windowing on devices where the platform's own restore/un-maximize
+            // gesture doesn't (this is the actual fix for that, not just a shortcut).
+            Direction.RESTORE -> {
+                val w = (displayWidth * 0.7f).toInt()
+                val h = (displayHeight * 0.7f).toInt()
+                val left = (displayWidth - w) / 2
+                val top = (displayHeight - h) / 2
+                intArrayOf(left, top, left + w, top + h)
+            }
         }
         Adb.runShell(manager, "am task resize $taskId ${bounds[0]} ${bounds[1]} ${bounds[2]} ${bounds[3]}")
     }

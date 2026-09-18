@@ -56,6 +56,11 @@ class ViewerActivity : AppCompatActivity() {
             KeyEvent.KEYCODE_DPAD_LEFT to WindowSnap.Direction.LEFT,
             KeyEvent.KEYCODE_DPAD_RIGHT to WindowSnap.Direction.RIGHT,
             KeyEvent.KEYCODE_DPAD_UP to WindowSnap.Direction.MAXIMIZE,
+            // Also the fix for a window stuck fullscreen on platforms where the
+            // built-in restore/un-maximize control doesn't actually shrink it back:
+            // explicit bounds smaller than the display pull it out of fullscreen
+            // windowing regardless of what the platform's own gesture does.
+            KeyEvent.KEYCODE_DPAD_DOWN to WindowSnap.Direction.RESTORE,
         )
     }
 
@@ -310,9 +315,11 @@ class ViewerActivity : AppCompatActivity() {
      * hardware/3-button-nav Back key is forwarded like any other key here; gesture
      * nav's Back has no KeyEvent at all and is handled separately below.
      *
-     * Meta+Left/Right/Up snap the focused window to a half or the full display
-     * (see WindowSnap) instead of being forwarded — Android's own desktop
-     * windowing has no shortcut for this, only drag gestures.
+     * Meta+Left/Right/Up/Down snap the focused window to a half, the full
+     * display, or a centered floating size (see WindowSnap) instead of being
+     * forwarded — Android's own desktop windowing has no shortcut for this,
+     * only drag gestures, and Meta+Down doubles as a fix for a window stuck
+     * fullscreen where the platform's own restore control doesn't work.
      */
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (event.keyCode in LOCAL_KEYCODES) {

@@ -49,7 +49,7 @@ Alternatively, a computer can create its own DeX virtual display without LocalDe
 
 Apps open as floating windows with a **drag handle** at the top: drag the handle to move, drag edges to resize, tap the handle for minimize / maximize / split-screen. Known quirk: the **split-screen** option in the handle menu moves the app into split-screen on the phone's main screen, not on the DeX display.
 
-With a keyboard attached, **Meta+Left/Right** snaps the focused window to the left/right half of the display, and **Meta+Up** maximizes it — Android's own desktop windowing has no shortcut for this (only the drag gestures above), so LocalDex drives it directly. Best-effort: it depends on `dumpsys`/`am` text output, not a stable API, so it can occasionally miss on some builds.
+With a keyboard attached, **Meta+Left/Right** snaps the focused window to the left/right half of the display, **Meta+Up** maximizes it, and **Meta+Down** floats it to a centered window — Android's own desktop windowing has no shortcut for any of this (only the drag gestures above), so LocalDex drives it directly. **Meta+Down also fixes a window stuck fullscreen** on builds where the platform's own restore/un-maximize control doesn't actually shrink it back — it works by setting explicit bounds smaller than the display, which pulls the task out of fullscreen windowing regardless of what the built-in gesture does. Best-effort: it depends on `dumpsys`/`am` text output, not a stable API, so it can occasionally miss on some builds.
 
 ## How it works
 

@@ -120,6 +120,15 @@ class ScrcpySession(
     /** Tail of the server's stdout/stderr, kept for error reporting. */
     private val serverLog = StringBuilder()
 
+    /**
+     * `enable_freeform_support`'s value before this session overwrote it, so [stop]
+     * can put it back — "null" (the literal string `settings get` prints for an
+     * unset key) means restoring it means deleting the key, not writing "null".
+     * Null here means we never successfully read/changed it, so there's nothing to
+     * restore.
+     */
+    private var originalFreeformSetting: String? = null
+
     fun start() {
         scope.launch {
             try {
@@ -147,8 +156,11 @@ class ScrcpySession(
 
         // "Enable freeform windows" (a standard developer option). Without it, apps on
         // the DeX display open full screen with no window controls. Takes effect for
-        // newly started apps; some builds want a reboot.
+        // newly started apps; some builds want a reboot. This is a device-wide
+        // setting, not scoped to this session's display, so its original value is
+        // captured first and put back in stop() rather than left as 1 forever.
         try {
+            originalFreeformSetting = Adb.runShell(manager, "settings get global enable_freeform_support").trim()
             Adb.runShell(manager, "settings put global enable_freeform_support 1")
         } catch (e: Exception) {
             Log.w(TAG, "Could not enable freeform windows", e)
@@ -328,6 +340,21 @@ class ScrcpySession(
         return WindowSnap.snap(mgr, displayId, videoWidth, videoHeight, direction)
     }
 
+    /** Puts `enable_freeform_support` back to what it was before this session touched it. */
+    private suspend fun restoreFreeformSetting() {
+        val original = originalFreeformSetting ?: return
+        val mgr = manager ?: return
+        try {
+            if (original == "null") {
+                Adb.runShell(mgr, "settings delete global enable_freeform_support")
+            } else {
+                Adb.runShell(mgr, "settings put global enable_freeform_support $original")
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not restore enable_freeform_support to '$original'", e)
+        }
+    }
+
     private fun serverLogTail(): String = synchronized(serverLog) {
         serverLog.toString().trim().takeLast(500).ifEmpty { "(no output)" }
     }
@@ -350,6 +377,7 @@ class ScrcpySession(
         scope.launch {
             videoDecoder?.stop()
             controller?.stop()
+            restoreFreeformSetting()
 
             listOf(videoStream, controlStream, shellStream).forEach { stream ->
                 try {

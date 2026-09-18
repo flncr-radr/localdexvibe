@@ -56,10 +56,6 @@ class ViewerActivity : AppCompatActivity() {
             KeyEvent.KEYCODE_DPAD_LEFT to WindowSnap.Direction.LEFT,
             KeyEvent.KEYCODE_DPAD_RIGHT to WindowSnap.Direction.RIGHT,
             KeyEvent.KEYCODE_DPAD_UP to WindowSnap.Direction.MAXIMIZE,
-            // Also the fix for a window stuck fullscreen on platforms where the
-            // built-in restore/un-maximize control doesn't actually shrink it back:
-            // explicit bounds smaller than the display pull it out of fullscreen
-            // windowing regardless of what the platform's own gesture does.
             KeyEvent.KEYCODE_DPAD_DOWN to WindowSnap.Direction.RESTORE,
         )
     }
@@ -122,7 +118,7 @@ class ViewerActivity : AppCompatActivity() {
         hideSystemBars()
 
         setupControlPanel()
-        viewerRestoreButton.setOnClickListener { triggerSnap(WindowSnap.Direction.RESTORE) }
+        viewerRestoreButton.setOnClickListener { triggerSnap(WindowSnap.Direction.TOGGLE) }
         viewerStopButton.setOnClickListener { confirmStop() }
 
         surfaceView.holder.addCallback(object : SurfaceHolder.Callback {
@@ -354,18 +350,26 @@ class ViewerActivity : AppCompatActivity() {
     }
 
     /**
-     * Best-effort: the two shell commands behind this (see WindowSnap) depend on
-     * dumpsys text formats, not a stable API, so a failure here is logged and
-     * toasted rather than surfaced any louder.
+     * Best-effort: the shell commands behind this (see WindowSnap) depend on
+     * dumpsys text formats, not a stable API. Both the failure cases and the
+     * exception path are toasted rather than failing silently — a button that
+     * looks like it did nothing is worse than one that says why.
      */
     private fun triggerSnap(direction: WindowSnap.Direction) {
         val activeSession = session ?: return
         lifecycleScope.launch {
-            try {
-                activeSession.snapWindow(direction)
+            val message = try {
+                when (activeSession.snapWindow(direction)) {
+                    WindowSnap.Result.MAXIMIZED, WindowSnap.Result.RESTORED, null -> null
+                    WindowSnap.Result.NO_FOCUSED_WINDOW -> "No focused window on the DeX display."
+                    WindowSnap.Result.NO_MATCHING_TASK -> "Couldn't identify the focused window."
+                }
             } catch (e: Exception) {
                 Log.w(TAG, "Window snap failed", e)
-                Toast.makeText(this@ViewerActivity, "Couldn't snap the window.", Toast.LENGTH_SHORT).show()
+                "Couldn't move the window."
+            }
+            if (message != null) {
+                Toast.makeText(this@ViewerActivity, message, Toast.LENGTH_SHORT).show()
             }
         }
     }

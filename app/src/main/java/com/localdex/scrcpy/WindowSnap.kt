@@ -5,33 +5,56 @@ import com.localdex.Adb
 import io.github.muntashirakon.adb.AbsAdbConnectionManager
 
 /**
- * Snaps the focused window on a DeX display to a half or the full display.
- * Android's desktop-windowing docs describe only drag gestures for this — no
- * keyboard shortcut — so this drives it directly with the same two shell
- * commands `am`'s own hidden "task"/"stack" subcommands use, verified against
- * the AOSP source they come from:
+ * Moves the focused window on a DeX display between fullscreen and a bounded
+ * (freeform) window. Android's desktop-windowing docs describe only drag
+ * gestures for this, so it's driven here with `am` shell commands instead.
  *
- * - `dumpsys window displays` prints each display's focused window under its
- *   own `Display: mDisplayId=N` header, as
- *   `mCurrentFocus=Window{<hash> u<uid> <title>}` (DisplayContent.dump /
- *   WindowState.toString).
- * - `am task resize <taskId> <left> <top> <right> <bottom>` moves/resizes a
- *   task (ActivityManagerShellCommand.runTaskResize / getBounds — the four
- *   bounds are separate space-separated args, not one comma-joined value).
- * - `am stack list` prints every root task's children under its own
- *   `RootTask id=... displayId=N` header, as
- *   `taskId=<id>: <component> bounds=... ...` (ActivityTaskManager.RootTaskInfo
- *   .toString / RootWindowContainer.getRootTaskInfo).
+ * Why this isn't just `am task resize`: that call is a **silent no-op on a
+ * maximized window**. ActivityTaskManagerService.resizeTask bails out early on
+ * `!task.getWindowConfiguration().canResizeTask()`, and canResizeTask() is
+ * `mWindowingMode == WINDOWING_MODE_FREEFORM || mWindowingMode ==
+ * WINDOWING_MODE_MULTI_WINDOW` — so a fullscreen task rejects every resize,
+ * logging "resizeTask not allowed on task=" server-side and changing nothing.
+ * Bounds alone can never un-maximize a window; the *windowing mode* has to
+ * change first. That's what an earlier version of this file got wrong.
  *
- * The window title and the task's component string can use different forms of
- * the same component (short vs. fully-qualified class name), so [WindowSnapParser]
- * only ever matches on the package substring — the one part guaranteed to agree
- * between them.
+ * The windowing mode is changed with `am start --task <id> --windowingMode
+ * <mode>`, which routes through ActivityOptions.setLaunchTaskId /
+ * setLaunchWindowingMode against the task that already exists, rather than
+ * starting anything new. Bounds are then applied with `am task resize`, which
+ * is legal once the task is freeform.
+ *
+ * Commands and their output formats were verified against AOSP source
+ * (ActivityManagerShellCommand, ActivityTaskManagerService, WindowConfiguration,
+ * DisplayContent.dump, ActivityTaskManager.RootTaskInfo.toString).
  */
 object WindowSnap {
     private const val TAG = "WindowSnap"
 
-    enum class Direction { LEFT, RIGHT, MAXIMIZE, RESTORE }
+    /** From WindowConfiguration: the windowing modes `am start --windowingMode` takes. */
+    private const val WINDOWING_MODE_FULLSCREEN = 1
+    private const val WINDOWING_MODE_FREEFORM = 5
+
+    /** A restored window's size, as a fraction of the display. */
+    private const val RESTORED_SIZE = 0.7f
+
+    enum class Direction {
+        LEFT,
+        RIGHT,
+        MAXIMIZE,
+        RESTORE,
+
+        /** Maximize a restored window, restore a maximized one. */
+        TOGGLE,
+    }
+
+    /** What [snap] did, so callers can tell the user when nothing happened. */
+    enum class Result {
+        MAXIMIZED,
+        RESTORED,
+        NO_FOCUSED_WINDOW,
+        NO_MATCHING_TASK,
+    }
 
     suspend fun snap(
         manager: AbsAdbConnectionManager,
@@ -39,39 +62,78 @@ object WindowSnap {
         displayWidth: Int,
         displayHeight: Int,
         direction: Direction,
-    ) {
+    ): Result {
         val focusedPackage = WindowSnapParser.parseFocusedPackage(
             Adb.runShell(manager, "dumpsys window displays"), displayId
         )
         if (focusedPackage == null) {
-            Log.w(TAG, "No focused window on display $displayId; not snapping")
-            return
+            Log.w(TAG, "No focused window on display $displayId; nothing to move")
+            return Result.NO_FOCUSED_WINDOW
         }
 
-        val taskId = WindowSnapParser.parseTaskId(
+        val task = WindowSnapParser.parseFocusedTask(
             Adb.runShell(manager, "am stack list"), displayId, focusedPackage
         )
-        if (taskId == null) {
-            Log.w(TAG, "Could not find a task for $focusedPackage on display $displayId")
-            return
+        if (task == null) {
+            Log.w(TAG, "No task found for $focusedPackage on display $displayId")
+            return Result.NO_MATCHING_TASK
         }
 
-        val bounds = when (direction) {
-            Direction.LEFT -> intArrayOf(0, 0, displayWidth / 2, displayHeight)
-            Direction.RIGHT -> intArrayOf(displayWidth / 2, 0, displayWidth, displayHeight)
-            Direction.MAXIMIZE -> intArrayOf(0, 0, displayWidth, displayHeight)
-            // A centered, explicitly-bounded rect — not full-display — since setting
-            // bounds smaller than the display is what pulls a task out of fullscreen
-            // windowing on devices where the platform's own restore/un-maximize
-            // gesture doesn't (this is the actual fix for that, not just a shortcut).
-            Direction.RESTORE -> {
-                val w = (displayWidth * 0.7f).toInt()
-                val h = (displayHeight * 0.7f).toInt()
-                val left = (displayWidth - w) / 2
-                val top = (displayHeight - h) / 2
-                intArrayOf(left, top, left + w, top + h)
+        val resolved = if (direction == Direction.TOGGLE) {
+            if (WindowSnapParser.isMaximized(task.bounds, displayWidth, displayHeight)) {
+                Direction.RESTORE
+            } else {
+                Direction.MAXIMIZE
             }
+        } else {
+            direction
         }
-        Adb.runShell(manager, "am task resize $taskId ${bounds[0]} ${bounds[1]} ${bounds[2]} ${bounds[3]}")
+        Log.i(TAG, "task=${task.taskId} ${task.component} bounds=${task.bounds} -> $resolved")
+
+        if (resolved == Direction.MAXIMIZE) {
+            setWindowingMode(manager, task, displayId, WINDOWING_MODE_FULLSCREEN)
+            return Result.MAXIMIZED
+        }
+
+        // Freeform first, then bounds — the order the resizeTask guard requires.
+        setWindowingMode(manager, task, displayId, WINDOWING_MODE_FREEFORM)
+        val bounds = boundsFor(resolved, displayWidth, displayHeight)
+        Adb.runShell(
+            manager,
+            "am task resize ${task.taskId} " +
+                "${bounds.left} ${bounds.top} ${bounds.right} ${bounds.bottom}"
+        )
+        return Result.RESTORED
+    }
+
+    private suspend fun setWindowingMode(
+        manager: AbsAdbConnectionManager,
+        task: WindowSnapParser.TaskWindow,
+        displayId: Int,
+        mode: Int,
+    ) {
+        val reply = Adb.runShell(
+            manager,
+            "am start --task ${task.taskId} --windowingMode $mode --display $displayId " +
+                "-n ${task.component}"
+        )
+        Log.i(TAG, "windowingMode=$mode on task ${task.taskId}: ${reply.ifBlank { "(no output)" }}")
+    }
+
+    private fun boundsFor(
+        direction: Direction,
+        displayWidth: Int,
+        displayHeight: Int,
+    ): WindowSnapParser.Bounds = when (direction) {
+        Direction.LEFT -> WindowSnapParser.Bounds(0, 0, displayWidth / 2, displayHeight)
+        Direction.RIGHT ->
+            WindowSnapParser.Bounds(displayWidth / 2, 0, displayWidth, displayHeight)
+        else -> {
+            val width = (displayWidth * RESTORED_SIZE).toInt()
+            val height = (displayHeight * RESTORED_SIZE).toInt()
+            val left = (displayWidth - width) / 2
+            val top = (displayHeight - height) / 2
+            WindowSnapParser.Bounds(left, top, left + width, top + height)
+        }
     }
 }

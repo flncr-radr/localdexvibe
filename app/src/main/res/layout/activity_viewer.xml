@@ -78,7 +78,7 @@
                 android:textAllCaps="false"
                 android:textSize="14sp"
                 android:textColor="@color/on_surface"
-                android:text="Restore Window" />
+                android:text="Window / Full" />
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/viewerStopButton"

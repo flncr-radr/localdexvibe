@@ -1,7 +1,9 @@
 package com.localdex.scrcpy
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -28,7 +30,7 @@ class WindowSnapParserTest {
           taskId=12: com.android.launcher3/com.android.launcher3.uioverrides.QuickstepLauncher bounds=[0,0][1080,2400] userId=0 visible=true topActivity=ComponentInfo{com.android.launcher3/com.android.launcher3.uioverrides.QuickstepLauncher}
         RootTask id=37 bounds=[0,0][1920,1440] displayId=7 userId=0
          configuration={1.0 310mcc260mnc}
-          taskId=37: com.example/com.example.MainActivity bounds=[0,0][1920,1440] userId=0 visible=true topActivity=ComponentInfo{com.example/com.example.MainActivity}
+          taskId=37: com.example/com.example.MainActivity bounds=[100,80][1400,1100] userId=0 visible=true topActivity=ComponentInfo{com.example/com.example.MainActivity}
     """.trimIndent()
 
     // -- parseFocusedPackage -------------------------------------------------------
@@ -64,29 +66,34 @@ class WindowSnapParserTest {
         assertNull(WindowSnapParser.parseFocusedPackage(text, 7))
     }
 
-    // -- parseTaskId ----------------------------------------------------------------
+    // -- parseFocusedTask -----------------------------------------------------------
 
     @Test
-    fun `parseTaskId matches by package under the matching display header`() {
-        assertEquals(37, WindowSnapParser.parseTaskId(amStackList, 7, "com.example"))
-        assertEquals(12, WindowSnapParser.parseTaskId(amStackList, 0, "com.android.launcher3"))
+    fun `parseFocusedTask matches by package and captures component and bounds`() {
+        val task = WindowSnapParser.parseFocusedTask(amStackList, 7, "com.example")!!
+        assertEquals(37, task.taskId)
+        // Fully-qualified form: what `am start -n` needs, not the short form the
+        // focused-window title uses.
+        assertEquals("com.example/com.example.MainActivity", task.component)
+        assertEquals(WindowSnapParser.Bounds(100, 80, 1400, 1100), task.bounds)
     }
 
     @Test
-    fun `parseTaskId returns null for a display id with no root task`() {
-        assertNull(WindowSnapParser.parseTaskId(amStackList, 99, "com.example"))
+    fun `parseFocusedTask returns null for a display id with no root task`() {
+        assertNull(WindowSnapParser.parseFocusedTask(amStackList, 99, "com.example"))
     }
 
     @Test
-    fun `parseTaskId falls back to the only child task on the display when the package does not match`() {
+    fun `parseFocusedTask falls back to the only task on the display when the package does not match`() {
         // Covers the window title using a different (short vs fully-qualified) form
         // of the component than the task list — package matching still fails, but
         // there's only one window open on this display so it's unambiguous anyway.
-        assertEquals(37, WindowSnapParser.parseTaskId(amStackList, 7, "com.mismatched.title.form"))
+        val task = WindowSnapParser.parseFocusedTask(amStackList, 7, "com.mismatched.title.form")!!
+        assertEquals(37, task.taskId)
     }
 
     @Test
-    fun `parseTaskId returns null when several tasks are on the display and none match`() {
+    fun `parseFocusedTask returns null when several tasks are on the display and none match`() {
         val text = """
             RootTask id=1 bounds=[0,0][960,1440] displayId=7 userId=0
              configuration={1.0}
@@ -95,6 +102,56 @@ class WindowSnapParserTest {
              configuration={1.0}
               taskId=2: com.second/com.second.Main bounds=[960,0][1920,1440] userId=0 visible=false topActivity=ComponentInfo{com.second/com.second.Main}
         """.trimIndent()
-        assertNull(WindowSnapParser.parseTaskId(text, 7, "com.unrelated"))
+        assertNull(WindowSnapParser.parseFocusedTask(text, 7, "com.unrelated"))
+    }
+
+    @Test
+    fun `parseFocusedTask tolerates a task line with no bounds`() {
+        // RootTaskInfo.toString only appends bounds when childTaskBounds is non-null.
+        val text = """
+            RootTask id=37 bounds=[0,0][1920,1440] displayId=7 userId=0
+             configuration={1.0}
+              taskId=37: com.example/com.example.MainActivity userId=0 visible=true
+        """.trimIndent()
+        val task = WindowSnapParser.parseFocusedTask(text, 7, "com.example")!!
+        assertEquals(37, task.taskId)
+        assertEquals("com.example/com.example.MainActivity", task.component)
+        assertNull(task.bounds)
+    }
+
+    // -- isMaximized ----------------------------------------------------------------
+
+    @Test
+    fun `isMaximized is true for bounds covering the whole display`() {
+        assertTrue(WindowSnapParser.isMaximized(WindowSnapParser.Bounds(0, 0, 1920, 1440), 1920, 1440))
+    }
+
+    @Test
+    fun `isMaximized allows a taskbar-sized strip off the full size`() {
+        // A maximized window sitting above a taskbar still counts as maximized.
+        assertTrue(WindowSnapParser.isMaximized(WindowSnapParser.Bounds(0, 0, 1920, 1380), 1920, 1440))
+    }
+
+    @Test
+    fun `isMaximized is false for a restored window`() {
+        // The 70% centred rect a restore produces.
+        assertFalse(WindowSnapParser.isMaximized(WindowSnapParser.Bounds(288, 216, 1632, 1224), 1920, 1440))
+    }
+
+    @Test
+    fun `isMaximized is false for a half-display snap`() {
+        assertFalse(WindowSnapParser.isMaximized(WindowSnapParser.Bounds(0, 0, 960, 1440), 1920, 1440))
+    }
+
+    @Test
+    fun `isMaximized is false when bounds are unknown`() {
+        // Toggling with nothing to go on should shrink, not grow — a window too
+        // small can still be dragged back, one stuck fullscreen is the bug itself.
+        assertFalse(WindowSnapParser.isMaximized(null, 1920, 1440))
+    }
+
+    @Test
+    fun `isMaximized is false for a display with no size yet`() {
+        assertFalse(WindowSnapParser.isMaximized(WindowSnapParser.Bounds(0, 0, 1920, 1440), 0, 0))
     }
 }

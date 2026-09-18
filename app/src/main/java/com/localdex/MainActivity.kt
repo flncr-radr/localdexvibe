@@ -29,6 +29,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var configGroup: View
     private lateinit var displaySpecPresetGroup: MaterialButtonToggleGroup
     private lateinit var displaySpecField: EditText
+    private lateinit var panelPositionGroup: MaterialButtonToggleGroup
     private lateinit var startButton: Button
     private lateinit var viewerButton: Button
     private lateinit var stopButton: Button
@@ -51,6 +52,7 @@ class MainActivity : AppCompatActivity() {
         configGroup = findViewById(R.id.configGroup)
         displaySpecPresetGroup = findViewById(R.id.displaySpecPresetGroup)
         displaySpecField = findViewById(R.id.displaySpecField)
+        panelPositionGroup = findViewById(R.id.panelPositionGroup)
         startButton = findViewById(R.id.startButton)
         viewerButton = findViewById(R.id.viewerButton)
         stopButton = findViewById(R.id.stopButton)
@@ -67,6 +69,16 @@ class MainActivity : AppCompatActivity() {
             // presetCustom has no mapped spec; selecting it just leaves the field as
             // it is, ready for manual editing.
             DISPLAY_SPEC_PRESETS[checkedId]?.let { spec -> displaySpecField.setText(spec) }
+        }
+
+        val initialPanelFraction = Prefs.getPanelPositionFraction(this)
+        panelPositionGroup.check(
+            PANEL_POSITION_PRESETS.entries.find { it.value == initialPanelFraction }?.key
+                ?: R.id.panelPositionOneThird
+        )
+        panelPositionGroup.addOnButtonCheckedListener { _, checkedId, isChecked ->
+            if (!isChecked) return@addOnButtonCheckedListener
+            PANEL_POSITION_PRESETS[checkedId]?.let { fraction -> Prefs.setPanelPositionFraction(this, fraction) }
         }
 
         refreshButton.setOnClickListener { checkStatus(forceCheck = true) }
@@ -324,6 +336,13 @@ class MainActivity : AppCompatActivity() {
             R.id.presetCompact to "1600x1200/280",
             R.id.presetBalanced to Prefs.DEFAULT_DISPLAY_SPEC,
             R.id.presetSpacious to "2560x1600/220",
+        )
+
+        /** Where the viewer's exit tab sits, as a fraction of screen height up from the bottom. */
+        private val PANEL_POSITION_PRESETS = mapOf(
+            R.id.panelPositionOneThird to 1f / 3f,
+            R.id.panelPositionHalf to 1f / 2f,
+            R.id.panelPositionTwoThirds to 2f / 3f,
         )
 
         /** Both are runtime (dangerous) permissions on minSdk 33+ — every device

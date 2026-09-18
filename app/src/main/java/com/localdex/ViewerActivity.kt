@@ -251,12 +251,23 @@ class ViewerActivity : AppCompatActivity() {
 
     /**
      * Starts the panel collapsed to just the grip peeking from the right edge, and
-     * wires the tap-to-toggle. Position (not visibility) is driven by translationX,
-     * set once the panel has a measured width — it starts at 0 on the very first
-     * layout pass, so setting it any earlier would just get overwritten with 0.
+     * wires the tap-to-toggle. Horizontal position (collapsed/expanded) is driven by
+     * translationX, set once the panel has a measured width — it starts at 0 on the
+     * very first layout pass, so setting it any earlier would just get overwritten
+     * with 0. Vertical position is re-applied on every layout change instead (fold/
+     * rotation can change root's height while the activity survives via
+     * configChanges), which is safe since it doesn't interact with the toggle state.
      */
     private fun setupControlPanel() {
+        val panelPositionFraction = Prefs.getPanelPositionFraction(this)
         controlPanel.addOnLayoutChangeListener { view, _, _, _, _, _, _, _, _ ->
+            if (root.height > 0) {
+                // The layout centers the panel by default (layout_gravity center_vertical,
+                // i.e. fraction 0.5); this is the offset from that baseline needed to
+                // land at the configured fraction from the bottom instead.
+                view.translationY = (0.5f - panelPositionFraction) * root.height
+            }
+
             if (controlPanelPositioned) return@addOnLayoutChangeListener
             val hiddenOffset = view.width - controlPanelGrip.width
             if (hiddenOffset <= 0) return@addOnLayoutChangeListener

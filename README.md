@@ -30,7 +30,7 @@ Pairing is one-time. After the first successful connection LocalDex grants itsel
 
 - **Display spec** is `WIDTHxHEIGHT/DPI` (default `1920x1440/240`). Lower DPI = more desktop room; higher DPI = bigger UI.
 - **Input is a virtual mouse**: one finger = click and drag (drag window handles to move windows), two fingers = scroll wheel. **Back** (gesture or key) is forwarded to DeX.
-- A grip peeks from the right edge — **tap it** to reveal the Stop button (with confirmation), tap again to hide it.
+- A grip peeks from the right edge — **tap it** to reveal the Stop button (with confirmation), tap again to hide it. Its vertical position (default 1/3 up from the bottom) is adjustable on the main screen under **Exit tab position**.
 - Leave the viewer with Home; the session keeps running. Return (or stop) via the **LocalDex notification** — the notification's *Stop* action always ends the session, even if the viewer is gone.
 
 ## Viewing DeX from a computer

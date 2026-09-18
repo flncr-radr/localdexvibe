@@ -22,6 +22,22 @@
         android:textSize="16sp"
         android:text="Starting…" />
 
+    <!-- Toggled by the panel's Stats button; opposite corner from the exit tab so
+         neither ever overlaps the other. -->
+    <TextView
+        android:id="@+id/viewerStatsOverlay"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|start"
+        android:layout_margin="12dp"
+        android:background="@drawable/stats_overlay_bg"
+        android:paddingHorizontal="10dp"
+        android:paddingVertical="6dp"
+        android:fontFamily="monospace"
+        android:textColor="@color/white"
+        android:textSize="12sp"
+        android:visibility="gone" />
+
     <!--
         Side control tab: a handle peeks from the right edge; tap it to reveal the
         window controls and Stop, tap again to hide them. Driven directly by
@@ -124,6 +140,22 @@
                 android:textSize="14sp"
                 android:textColor="@color/on_surface"
                 android:text="Window / Full" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/viewerStatsButton"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:layout_marginTop="8dp"
+                android:paddingHorizontal="20dp"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                app:cornerRadius="12dp"
+                app:strokeColor="@color/outline"
+                android:textAllCaps="false"
+                android:textSize="14sp"
+                android:textColor="@color/on_surface"
+                android:text="Show Stats" />
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/viewerStopButton"

@@ -8,6 +8,7 @@ import java.io.DataInputStream
 import java.io.IOException
 import java.io.InputStream
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Reads the scrcpy v4.1 video stream and decodes it onto a [Surface].
@@ -40,6 +41,11 @@ class VideoDecoder(
 
     private var codec: MediaCodec? = null
     private var outputThread: Thread? = null
+
+    private val frameCount = AtomicLong(0)
+
+    /** Frames actually rendered to the surface, for the viewer's stats overlay. */
+    val framesRendered: Long get() = frameCount.get()
 
     private var videoWidth = 0
     private var videoHeight = 0
@@ -237,7 +243,9 @@ class VideoDecoder(
                 val index = codec.dequeueOutputBuffer(info, 50_000)
                 if (index >= 0) {
                     // Render immediately: the source display is live, latency beats pacing.
-                    codec.releaseOutputBuffer(index, renderEnabled)
+                    val shouldRender = renderEnabled
+                    codec.releaseOutputBuffer(index, shouldRender)
+                    if (shouldRender) frameCount.incrementAndGet()
                 }
             }
         } catch (e: IllegalStateException) {

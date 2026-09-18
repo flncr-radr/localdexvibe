@@ -23,8 +23,10 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.lifecycleScope
 import com.localdex.scrcpy.ScrcpySession
 import com.localdex.scrcpy.WindowSnap
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /**
@@ -68,7 +70,9 @@ class ViewerActivity : AppCompatActivity() {
     private lateinit var viewerSnapLeftButton: Button
     private lateinit var viewerSnapRightButton: Button
     private lateinit var viewerRestoreButton: Button
+    private lateinit var viewerStatsButton: Button
     private lateinit var viewerStopButton: Button
+    private lateinit var viewerStatsOverlay: TextView
     private lateinit var clipboardManager: ClipboardManager
 
     private var surfaceReady = false
@@ -76,6 +80,8 @@ class ViewerActivity : AppCompatActivity() {
     private var freeformWarningWatchStarted = false
     private var controlPanelExpanded = false
     private var controlPanelPositioned = false
+    private var statsVisible = false
+    private var statsJob: Job? = null
 
     /**
      * The last text either sent to, or received from, the device's clipboard —
@@ -115,7 +121,9 @@ class ViewerActivity : AppCompatActivity() {
         viewerSnapLeftButton = findViewById(R.id.viewerSnapLeftButton)
         viewerSnapRightButton = findViewById(R.id.viewerSnapRightButton)
         viewerRestoreButton = findViewById(R.id.viewerRestoreButton)
+        viewerStatsButton = findViewById(R.id.viewerStatsButton)
         viewerStopButton = findViewById(R.id.viewerStopButton)
+        viewerStatsOverlay = findViewById(R.id.viewerStatsOverlay)
         clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
 
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -125,6 +133,7 @@ class ViewerActivity : AppCompatActivity() {
         viewerSnapLeftButton.setOnClickListener { triggerSnap(WindowSnap.Direction.LEFT) }
         viewerSnapRightButton.setOnClickListener { triggerSnap(WindowSnap.Direction.RIGHT) }
         viewerRestoreButton.setOnClickListener { triggerSnap(WindowSnap.Direction.TOGGLE) }
+        viewerStatsButton.setOnClickListener { toggleStats() }
         viewerStopButton.setOnClickListener { confirmStop() }
 
         surfaceView.holder.addCallback(object : SurfaceHolder.Callback {
@@ -376,6 +385,46 @@ class ViewerActivity : AppCompatActivity() {
             }
             if (message != null) {
                 Toast.makeText(this@ViewerActivity, message, Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    private fun toggleStats() {
+        statsVisible = !statsVisible
+        viewerStatsButton.text = if (statsVisible) "Hide Stats" else "Show Stats"
+        viewerStatsOverlay.visibility = if (statsVisible) View.VISIBLE else View.GONE
+        if (statsVisible) startStatsUpdates() else statsJob?.cancel()
+    }
+
+    /**
+     * Refreshes the stats overlay once a second: fps from the delta in
+     * [com.localdex.scrcpy.VideoDecoder.framesRendered] over the elapsed wall time
+     * (a period average, not an instantaneous rate — smoother and cheap enough to
+     * poll rather than needing VideoDecoder to push updates), plus resolution and
+     * how long this viewer has had the overlay open.
+     */
+    private fun startStatsUpdates() {
+        statsJob?.cancel()
+        val startElapsed = android.os.SystemClock.elapsedRealtime()
+        var lastFrames = 0L
+        var lastElapsed = startElapsed
+        statsJob = lifecycleScope.launch {
+            while (isActive) {
+                val s = session
+                val decoder = s?.videoDecoder
+                if (s != null && decoder != null) {
+                    val now = android.os.SystemClock.elapsedRealtime()
+                    val frames = decoder.framesRendered
+                    val elapsedMs = now - lastElapsed
+                    val fps = if (elapsedMs > 0) (frames - lastFrames) * 1000 / elapsedMs else 0
+                    lastFrames = frames
+                    lastElapsed = now
+                    val uptimeSec = (now - startElapsed) / 1000
+                    viewerStatsOverlay.text = "%dx%d  •  %d fps  •  %02d:%02d".format(
+                        s.videoWidth, s.videoHeight, fps, uptimeSec / 60, uptimeSec % 60
+                    )
+                }
+                delay(1000)
             }
         }
     }

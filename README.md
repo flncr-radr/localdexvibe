@@ -49,6 +49,8 @@ Alternatively, a computer can create its own DeX virtual display without LocalDe
 
 Apps open as floating windows with a **drag handle** at the top: drag the handle to move, drag edges to resize, tap the handle for minimize / maximize / split-screen. Known quirk: the **split-screen** option in the handle menu moves the app into split-screen on the phone's main screen, not on the DeX display.
 
+With a keyboard attached, **Meta+Left/Right** snaps the focused window to the left/right half of the display, and **Meta+Up** maximizes it — Android's own desktop windowing has no shortcut for this (only the drag gestures above), so LocalDex drives it directly. Best-effort: it depends on `dumpsys`/`am` text output, not a stable API, so it can occasionally miss on some builds.
+
 ## How it works
 
 The interesting parts — the on-device ADB connection, the bundled scrcpy server and custom client, and the one-line trick that brings resizable windows back on One UI 8.5+ — are covered in the [technical breakdown](docs/TECHNICAL.md). Built on [libadb-android](https://github.com/MuntashirAkon/libadb-android) (ADB layer ported from [anyapk](https://github.com/sam1am/anyapk)) and [scrcpy](https://github.com/Genymobile/scrcpy).

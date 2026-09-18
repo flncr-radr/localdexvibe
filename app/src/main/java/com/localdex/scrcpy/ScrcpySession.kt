@@ -316,6 +316,17 @@ class ScrcpySession(
         }
     }
 
+    /**
+     * Snaps the focused window on this session's display to a half or the full
+     * display. A no-op if the display id or video size (needed to compute the
+     * target bounds) aren't known yet, or if there is no ADB connection anymore.
+     */
+    suspend fun snapWindow(direction: WindowSnap.Direction) {
+        val mgr = manager ?: return
+        if (displayId == -1 || videoWidth <= 0 || videoHeight <= 0) return
+        WindowSnap.snap(mgr, displayId, videoWidth, videoHeight, direction)
+    }
+
     private fun serverLogTail(): String = synchronized(serverLog) {
         serverLog.toString().trim().takeLast(500).ifEmpty { "(no output)" }
     }

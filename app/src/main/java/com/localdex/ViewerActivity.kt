@@ -5,6 +5,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.os.Bundle
+import android.util.Log
 import android.view.KeyEvent
 import android.view.SurfaceHolder
 import android.view.SurfaceView
@@ -22,6 +23,7 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.lifecycleScope
 import com.google.android.material.bottomsheet.BottomSheetBehavior
 import com.localdex.scrcpy.ScrcpySession
+import com.localdex.scrcpy.WindowSnap
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
@@ -37,11 +39,24 @@ import kotlinx.coroutines.launch
 class ViewerActivity : AppCompatActivity() {
 
     companion object {
+        private const val TAG = "ViewerActivity"
+
         /** Kept local to the phone rather than forwarded to DeX. */
         private val LOCAL_KEYCODES = setOf(
             KeyEvent.KEYCODE_VOLUME_UP,
             KeyEvent.KEYCODE_VOLUME_DOWN,
             KeyEvent.KEYCODE_VOLUME_MUTE,
+        )
+
+        /**
+         * Meta+arrow window snapping — not a documented Android shortcut, so this
+         * app drives it itself (see WindowSnap). Held locally rather than forwarded:
+         * DeX has nothing bound to these combinations anyway.
+         */
+        private val SNAP_DIRECTIONS = mapOf(
+            KeyEvent.KEYCODE_DPAD_LEFT to WindowSnap.Direction.LEFT,
+            KeyEvent.KEYCODE_DPAD_RIGHT to WindowSnap.Direction.RIGHT,
+            KeyEvent.KEYCODE_DPAD_UP to WindowSnap.Direction.MAXIMIZE,
         )
     }
 
@@ -259,16 +274,46 @@ class ViewerActivity : AppCompatActivity() {
      * Volume keys are left local so the phone's own volume stays reachable. A
      * hardware/3-button-nav Back key is forwarded like any other key here; gesture
      * nav's Back has no KeyEvent at all and is handled separately below.
+     *
+     * Meta+Left/Right/Up snap the focused window to a half or the full display
+     * (see WindowSnap) instead of being forwarded — Android's own desktop
+     * windowing has no shortcut for this, only drag gestures.
      */
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (event.keyCode in LOCAL_KEYCODES) {
             return super.dispatchKeyEvent(event)
+        }
+        if (event.isMetaPressed) {
+            val direction = SNAP_DIRECTIONS[event.keyCode]
+            if (direction != null) {
+                if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+                    triggerSnap(direction)
+                }
+                return true
+            }
         }
         if (event.action == KeyEvent.ACTION_DOWN || event.action == KeyEvent.ACTION_UP) {
             session?.controller?.sendKeyEvent(event.action, event.keyCode, event.repeatCount, event.metaState)
             return true
         }
         return super.dispatchKeyEvent(event)
+    }
+
+    /**
+     * Best-effort: the two shell commands behind this (see WindowSnap) depend on
+     * dumpsys text formats, not a stable API, so a failure here is logged and
+     * toasted rather than surfaced any louder.
+     */
+    private fun triggerSnap(direction: WindowSnap.Direction) {
+        val activeSession = session ?: return
+        lifecycleScope.launch {
+            try {
+                activeSession.snapWindow(direction)
+            } catch (e: Exception) {
+                Log.w(TAG, "Window snap failed", e)
+                Toast.makeText(this@ViewerActivity, "Couldn't snap the window.", Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
     // Forwarded to DeX instead of leaving the viewer; leaving is done via the

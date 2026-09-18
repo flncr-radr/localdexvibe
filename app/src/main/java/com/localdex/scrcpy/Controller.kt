@@ -24,7 +24,8 @@ import java.util.concurrent.atomic.AtomicLong
  * touchscreen pointer, while the mouse drag path works — it's the same reason
  * window dragging works from desktop scrcpy.
  *
- * Gestures: one finger = mouse click/drag; two fingers = scroll wheel.
+ * Gestures: one finger = mouse click/drag; two fingers = scroll wheel, or a
+ * right click if they lift again without moving (a stationary two-finger tap).
  *
  * Writes happen on a dedicated thread so touch handling never blocks the UI
  * thread on a socket.
@@ -42,6 +43,13 @@ class Controller(
 
         private const val POINTER_ID_MOUSE = -1L
         private const val BUTTON_PRIMARY = 1 // MotionEvent.BUTTON_PRIMARY
+        private const val BUTTON_SECONDARY = 2 // MotionEvent.BUTTON_SECONDARY
+
+        /**
+         * A two-finger gesture that never moves more than this (in video px) before
+         * lifting is a tap (right click), not an aborted scroll.
+         */
+        private const val TAP_MAX_MOVEMENT_PX = 20
     }
 
     private val queue = LinkedBlockingQueue<ByteArray>()
@@ -152,6 +160,12 @@ class Controller(
         queue.offer(buffer.array())
     }
 
+    private fun sendRightClick(x: Int, y: Int, videoWidth: Int, videoHeight: Int) {
+        sendMouse(MotionEvent.ACTION_HOVER_MOVE, x, y, videoWidth, videoHeight, 0f, 0, 0)
+        sendMouse(MotionEvent.ACTION_DOWN, x, y, videoWidth, videoHeight, 1f, BUTTON_SECONDARY, BUTTON_SECONDARY)
+        sendMouse(MotionEvent.ACTION_UP, x, y, videoWidth, videoHeight, 0f, BUTTON_SECONDARY, 0)
+    }
+
     private fun sendScroll(
         x: Int,
         y: Int,
@@ -179,6 +193,10 @@ class Controller(
     private var gesture = Gesture.NONE
     private var lastX = 0
     private var lastY = 0
+
+    /** Where the current two-finger gesture started, to tell a tap from a scroll. */
+    private var scrollStartX = 0
+    private var scrollStartY = 0
 
     /**
      * Forwards a [MotionEvent] from a view of size [viewWidth]x[viewHeight] that shows
@@ -228,6 +246,8 @@ class Controller(
                     gesture = Gesture.SCROLL
                     lastX = centroidX()
                     lastY = centroidY()
+                    scrollStartX = lastX
+                    scrollStartY = lastY
                 }
             }
             MotionEvent.ACTION_MOVE -> {
@@ -257,7 +277,14 @@ class Controller(
             }
             MotionEvent.ACTION_POINTER_UP -> {
                 if (gesture == Gesture.SCROLL && event.pointerCount <= 2) {
-                    // Dropping back to one finger; ignore the remainder of the gesture.
+                    // Dropping back to one finger. If the two fingers never really
+                    // moved, treat the whole gesture as a tap (right click) instead
+                    // of a scroll that just happened to cover no distance.
+                    if (kotlin.math.abs(lastX - scrollStartX) <= TAP_MAX_MOVEMENT_PX &&
+                        kotlin.math.abs(lastY - scrollStartY) <= TAP_MAX_MOVEMENT_PX
+                    ) {
+                        sendRightClick(lastX, lastY, videoWidth, videoHeight)
+                    }
                     gesture = Gesture.DONE
                 }
             }

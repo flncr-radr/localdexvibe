@@ -1,0 +1,13 @@
+# Force consistent line endings regardless of a contributor's local Git
+# config, so Windows checkouts don't corrupt the gradlew shebang line
+# (CRLF turns `#!/usr/bin/env sh` into `sh\r`, which fails to run).
+* text=auto eol=lf
+
+*.bat text eol=crlf
+
+gradlew text eol=lf
+gradlew.bat text eol=crlf
+
+*.jar binary
+*.png binary
+*.jpg binary

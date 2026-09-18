@@ -10,19 +10,27 @@ import org.junit.Test
  * Samples below mirror the real `toString()`/`dump()` output verified against
  * AOSP source (DisplayContent.dump, WindowState.toString, RootTaskInfo.toString,
  * RootWindowContainer.getRootTaskInfo) — not guessed formats.
+ *
+ * The two-space indent on the `Display:` lines is load-bearing and deliberate:
+ * RootWindowContainer.dumpDisplayContents calls `displayContent.dump(pw, "  ",
+ * true)` and DisplayContent.dump prints that prefix before "Display: mDisplayId=".
+ * An earlier version of this fixture left the indent off, so it agreed with a
+ * column-0-anchored regex that could never match real output — the parse found
+ * nothing on device while these tests passed.
  */
 class WindowSnapParserTest {
 
     private val dumpsysWindowDisplays = """
-        Display: mDisplayId=0
-          init=true mDeferredRemoval=false stopped=false
-          mCurrentFocus=Window{a1b2c3d4 u0 com.android.launcher3/.Launcher}
-          mLastOrientation=0
-        Display: mDisplayId=7 (organized)
-          init=true mDeferredRemoval=false stopped=false
-          mCurrentFocus=Window{f00d1234 u0 com.example/.MainActivity}
-          mLastOrientation=0
-    """.trimIndent()
+        |WINDOW MANAGER DISPLAY CONTENTS (dumpsys window displays)
+        |  Display: mDisplayId=0
+        |    init=true mDeferredRemoval=false stopped=false
+        |  mCurrentFocus=Window{a1b2c3d4 u0 com.android.launcher3/.Launcher}
+        |  mFocusedApp=ActivityRecord{1111 u0 com.android.launcher3/.Launcher}
+        |  Display: mDisplayId=7 (organized)
+        |    init=true mDeferredRemoval=false stopped=false
+        |  mCurrentFocus=Window{f00d1234 u0 com.example/.MainActivity}
+        |  mFocusedApp=ActivityRecord{2222 u0 com.example/.MainActivity}
+    """.trimMargin()
 
     private val amStackList = """
         RootTask id=12 bounds=[0,0][1080,2400] displayId=0 userId=0
@@ -49,20 +57,20 @@ class WindowSnapParserTest {
     @Test
     fun `parseFocusedPackage returns null when the display has no focus`() {
         val text = """
-            Display: mDisplayId=7
-              mCurrentFocus=null
-        """.trimIndent()
+            |  Display: mDisplayId=7
+            |  mCurrentFocus=null
+        """.trimMargin()
         assertNull(WindowSnapParser.parseFocusedPackage(text, 7))
     }
 
     @Test
     fun `parseFocusedPackage ignores focus lines under a different display's header`() {
         val text = """
-            Display: mDisplayId=0
-              mCurrentFocus=Window{aaaa u0 com.other/.Other}
-            Display: mDisplayId=7
-              mCurrentFocus=null
-        """.trimIndent()
+            |  Display: mDisplayId=0
+            |  mCurrentFocus=Window{aaaa u0 com.other/.Other}
+            |  Display: mDisplayId=7
+            |  mCurrentFocus=null
+        """.trimMargin()
         assertNull(WindowSnapParser.parseFocusedPackage(text, 7))
     }
 
@@ -93,15 +101,40 @@ class WindowSnapParserTest {
     }
 
     @Test
-    fun `parseFocusedTask returns null when several tasks are on the display and none match`() {
+    fun `parseFocusedTask works with no focus hint at all`() {
+        // The real case behind "No focused window on the DeX display": this app's
+        // own window holds focus while its button is tapped, so the hint is null.
+        val task = WindowSnapParser.parseFocusedTask(amStackList, 7, null)!!
+        assertEquals(37, task.taskId)
+    }
+
+    @Test
+    fun `parseFocusedTask prefers the visible task when the hint does not resolve`() {
         val text = """
-            RootTask id=1 bounds=[0,0][960,1440] displayId=7 userId=0
-             configuration={1.0}
-              taskId=1: com.first/com.first.Main bounds=[0,0][960,1440] userId=0 visible=true topActivity=ComponentInfo{com.first/com.first.Main}
-            RootTask id=2 bounds=[960,0][1920,1440] displayId=7 userId=0
-             configuration={1.0}
-              taskId=2: com.second/com.second.Main bounds=[960,0][1920,1440] userId=0 visible=false topActivity=ComponentInfo{com.second/com.second.Main}
-        """.trimIndent()
+            |RootTask id=1 bounds=[0,0][1920,1440] displayId=7 userId=0
+            | configuration={1.0}
+            |  taskId=1: com.first/com.first.Main bounds=[0,0][1920,1440] userId=0 visible=true topActivity=ComponentInfo{com.first/com.first.Main}
+            |RootTask id=2 bounds=[0,0][960,1440] displayId=7 userId=0
+            | configuration={1.0}
+            |  taskId=2: com.second/com.second.Main bounds=[0,0][960,1440] userId=0 visible=false topActivity=ComponentInfo{com.second/com.second.Main}
+        """.trimMargin()
+        val task = WindowSnapParser.parseFocusedTask(text, 7, null)!!
+        assertEquals(1, task.taskId)
+        assertTrue(task.visible)
+    }
+
+    @Test
+    fun `parseFocusedTask returns null when several visible tasks match nothing`() {
+        // Two windows side by side, neither matching the hint: genuinely ambiguous,
+        // so it declines rather than moving whichever one happened to be parsed first.
+        val text = """
+            |RootTask id=1 bounds=[0,0][960,1440] displayId=7 userId=0
+            | configuration={1.0}
+            |  taskId=1: com.first/com.first.Main bounds=[0,0][960,1440] userId=0 visible=true topActivity=ComponentInfo{com.first/com.first.Main}
+            |RootTask id=2 bounds=[960,0][1920,1440] displayId=7 userId=0
+            | configuration={1.0}
+            |  taskId=2: com.second/com.second.Main bounds=[960,0][1920,1440] userId=0 visible=true topActivity=ComponentInfo{com.second/com.second.Main}
+        """.trimMargin()
         assertNull(WindowSnapParser.parseFocusedTask(text, 7, "com.unrelated"))
     }
 

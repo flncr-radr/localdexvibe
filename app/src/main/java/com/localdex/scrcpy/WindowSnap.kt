@@ -52,7 +52,6 @@ object WindowSnap {
     enum class Result {
         MAXIMIZED,
         RESTORED,
-        NO_FOCUSED_WINDOW,
         NO_MATCHING_TASK,
     }
 
@@ -63,19 +62,18 @@ object WindowSnap {
         displayHeight: Int,
         direction: Direction,
     ): Result {
+        // A hint, not a requirement: this app's own window holds focus while its
+        // button is being tapped, so the DeX display's focus is often unknown here.
         val focusedPackage = WindowSnapParser.parseFocusedPackage(
             Adb.runShell(manager, "dumpsys window displays"), displayId
         )
-        if (focusedPackage == null) {
-            Log.w(TAG, "No focused window on display $displayId; nothing to move")
-            return Result.NO_FOCUSED_WINDOW
-        }
+        Log.i(TAG, "focused package on display $displayId: ${focusedPackage ?: "(unknown)"}")
 
         val task = WindowSnapParser.parseFocusedTask(
             Adb.runShell(manager, "am stack list"), displayId, focusedPackage
         )
         if (task == null) {
-            Log.w(TAG, "No task found for $focusedPackage on display $displayId")
+            Log.w(TAG, "No task to move on display $displayId (focus hint: $focusedPackage)")
             return Result.NO_MATCHING_TASK
         }
 

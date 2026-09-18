@@ -7,13 +7,18 @@ package com.localdex.scrcpy
  * these formats correctly, not in anything device-specific.
  */
 internal object WindowSnapParser {
-    private val DISPLAY_HEADER = Regex("""^Display: mDisplayId=(\d+)""")
+    // Every one of these tolerates leading whitespace on purpose: DisplayContent.dump
+    // is called as dump(pw, "  ", true) from RootWindowContainer.dumpDisplayContents,
+    // so it prints "  Display: mDisplayId=7", not "Display: mDisplayId=7". Anchoring
+    // this one at column 0 is what made the whole lookup silently find nothing.
+    private val DISPLAY_HEADER = Regex("""^\s*Display: mDisplayId=(\d+)""")
     private val CURRENT_FOCUS = Regex("""^\s*mCurrentFocus=Window\{\S+ u\d+ ([^}]+)\}""")
     private val CURRENT_FOCUS_NULL = Regex("""^\s*mCurrentFocus=null\s*$""")
 
-    private val ROOT_TASK_HEADER = Regex("""^RootTask id=\d+ .*displayId=(\d+)""")
+    private val ROOT_TASK_HEADER = Regex("""^\s*RootTask id=\d+ .*displayId=(\d+)""")
     private val CHILD_TASK_LINE =
         Regex("""^\s*taskId=(\d+): (\S+)(?: bounds=\[(-?\d+),(-?\d+)]\[(-?\d+),(-?\d+)])?""")
+    private val VISIBLE_FLAG = Regex("""\bvisible=(true|false)\b""")
 
     /** A window's bounds on its display, as `am stack list` reports them. */
     data class Bounds(val left: Int, val top: Int, val right: Int, val bottom: Int) {
@@ -26,7 +31,12 @@ internal object WindowSnapParser {
      * `package/class` form `am start -n` needs; [bounds] is absent when
      * `am stack list` didn't report any for the task.
      */
-    data class TaskWindow(val taskId: Int, val component: String, val bounds: Bounds?)
+    data class TaskWindow(
+        val taskId: Int,
+        val component: String,
+        val bounds: Bounds?,
+        val visible: Boolean = false,
+    )
 
     /** The package of the focused window on [displayId], from `dumpsys window displays`. */
     fun parseFocusedPackage(dumpsysWindowDisplays: String, displayId: Int): String? {
@@ -41,15 +51,18 @@ internal object WindowSnapParser {
     }
 
     /**
-     * The task on [displayId] whose component's package matches [focusedPackage],
-     * from `am stack list`. Falls back to the display's only child task if there's
-     * exactly one and none matched by package — a single open window, the common
-     * case for this app, needs no match at all to know which task to act on.
+     * The task on [displayId] to act on, from `am stack list`.
+     *
+     * [focusedPackage] is only a hint, and may be null: the window this app itself
+     * is showing has focus while its own button is being tapped, so the DeX
+     * display's own focus can legitimately be unknown at that moment. When the hint
+     * doesn't resolve, the display's single visible task — and failing that, its
+     * single task of any kind — is unambiguous enough to act on.
      */
     fun parseFocusedTask(
         amStackList: String,
         displayId: Int,
-        focusedPackage: String,
+        focusedPackage: String?,
     ): TaskWindow? {
         var currentDisplay: Int? = null
         val candidates = mutableListOf<TaskWindow>()
@@ -59,12 +72,14 @@ internal object WindowSnapParser {
             val match = CHILD_TASK_LINE.find(line) ?: continue
             val taskId = match.groupValues[1].toIntOrNull() ?: continue
             val component = match.groupValues[2]
-            val bounds = parseBounds(match.groupValues)
-            val task = TaskWindow(taskId, component, bounds)
-            if (component.substringBefore('/') == focusedPackage) return task
+            val visible = VISIBLE_FLAG.find(line)?.groupValues?.get(1) == "true"
+            val task = TaskWindow(taskId, component, parseBounds(match.groupValues), visible)
+            if (focusedPackage != null && component.substringBefore('/') == focusedPackage) {
+                return task
+            }
             candidates += task
         }
-        return candidates.singleOrNull()
+        return candidates.singleOrNull { it.visible } ?: candidates.singleOrNull()
     }
 
     private fun parseBounds(groups: List<String>): Bounds? {

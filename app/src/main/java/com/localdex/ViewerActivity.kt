@@ -361,8 +361,8 @@ class ViewerActivity : AppCompatActivity() {
             val message = try {
                 when (activeSession.snapWindow(direction)) {
                     WindowSnap.Result.MAXIMIZED, WindowSnap.Result.RESTORED, null -> null
-                    WindowSnap.Result.NO_FOCUSED_WINDOW -> "No focused window on the DeX display."
-                    WindowSnap.Result.NO_MATCHING_TASK -> "Couldn't identify the focused window."
+                    WindowSnap.Result.NO_MATCHING_TASK ->
+                        "Couldn't tell which DeX window to move."
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "Window snap failed", e)

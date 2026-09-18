@@ -1,6 +1,8 @@
 package com.localdex
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Bundle
 import android.provider.Settings
 import android.view.View
@@ -8,8 +10,10 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.google.android.material.button.MaterialButtonToggleGroup
 import com.localdex.scrcpy.ScrcpySession
@@ -28,6 +32,14 @@ class MainActivity : AppCompatActivity() {
     private lateinit var startButton: Button
     private lateinit var viewerButton: Button
     private lateinit var stopButton: Button
+
+    // Denial just means the setup checklist's notification step stays unchecked
+    // (areNotificationsEnabled() already reflects it) and pairing discovery fails
+    // gracefully (AdbMdns catches the resulting SecurityException) — nothing here
+    // needs the actual grant results, just a re-check once the dialog is gone.
+    private val requestRuntimePermissions = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { checkStatus(forceCheck = true) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -66,6 +78,22 @@ class MainActivity : AppCompatActivity() {
             DexService.stop(this)
             statusText.postDelayed({ checkStatus() }, 500)
         }
+
+        ensureRuntimePermissions()
+    }
+
+    /**
+     * Requests whichever of the two runtime permissions minSdk 33 requires aren't
+     * granted yet: POST_NOTIFICATIONS (the pairing-code entry notification) and
+     * NEARBY_WIFI_DEVICES (AdbMdns's pairing-service discovery). Asked once per
+     * launch here rather than from onResume, so a denial doesn't re-prompt on
+     * every return to the app.
+     */
+    private fun ensureRuntimePermissions() {
+        val missing = RUNTIME_PERMISSIONS.filter {
+            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+        }
+        if (missing.isNotEmpty()) requestRuntimePermissions.launch(missing.toTypedArray())
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -296,6 +324,13 @@ class MainActivity : AppCompatActivity() {
             R.id.presetCompact to "1600x1200/280",
             R.id.presetBalanced to Prefs.DEFAULT_DISPLAY_SPEC,
             R.id.presetSpacious to "2560x1600/220",
+        )
+
+        /** Both are runtime (dangerous) permissions on minSdk 33+ — every device
+         *  this app supports needs them requested, not just declared. */
+        private val RUNTIME_PERMISSIONS = arrayOf(
+            Manifest.permission.POST_NOTIFICATIONS,
+            Manifest.permission.NEARBY_WIFI_DEVICES,
         )
     }
 }

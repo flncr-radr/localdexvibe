@@ -8,8 +8,8 @@ LocalDex creates a hidden second display on your phone, lets Samsung run the DeX
 
 ## Requirements
 
-- Samsung device on **One UI 8 or later** (desktop on virtual displays)
-- Android 11+ (wireless debugging)
+- Samsung device on **One UI 8 or later** (desktop on virtual displays), Galaxy S23 or newer hardware generation
+- Android 13+ (wireless debugging, and the runtime permissions pairing discovery needs on this API level)
 - Wi-Fi network (wireless debugging needs an active Wi-Fi connection; no data leaves the device — the connection is phone-to-itself)
 
 ## Setup
@@ -30,7 +30,7 @@ Pairing is one-time. After the first successful connection LocalDex grants itsel
 
 - **Display spec** is `WIDTHxHEIGHT/DPI` (default `1920x1440/240`). Lower DPI = more desktop room; higher DPI = bigger UI.
 - **Input is a virtual mouse**: one finger = click and drag (drag window handles to move windows), two fingers = scroll wheel. **Back** (gesture or key) is forwarded to DeX.
-- The translucent **✕ button** stops the session (with confirmation). **Tap-and-hold to drag it** anywhere — it starts in the top-right corner.
+- A grip peeks at the bottom edge — **drag it up** to reveal the Stop button (with confirmation).
 - Leave the viewer with Home; the session keeps running. Return (or stop) via the **LocalDex notification** — the notification's *Stop* action always ends the session, even if the viewer is gone.
 
 ## Viewing DeX from a computer

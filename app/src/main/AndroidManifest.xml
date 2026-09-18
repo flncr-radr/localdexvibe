@@ -12,6 +12,17 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <!--
+        Lets AdbMdns keep discovering the wireless-debugging pairing service via
+        NsdManager without ACCESS_FINE_LOCATION, required once targeting API 33+.
+        minSdk is 33, so every supported device has this permission available —
+        no ACCESS_FINE_LOCATION/maxSdkVersion fallback needed. neverForLocation is
+        accurate: mDNS pairing discovery has nothing to do with location.
+    -->
+    <uses-permission
+        android:name="android.permission.NEARBY_WIFI_DEVICES"
+        android:usesPermissionFlags="neverForLocation" />
+
+    <!--
         Lets LocalDex switch Wireless debugging back on by itself. Not grantable at
         install time; the app grants it to itself over ADB once paired (see
         WirelessDebugging). Harmless when never granted.
@@ -57,7 +68,7 @@
 
         <!--
             Pairing input service with RemoteInput. No foregroundServiceType: at
-            targetSdk 30 the platform does not require one (see anyapk's notes).
+            targetSdk 33 the platform does not require one (see anyapk's notes).
         -->
         <service
             android:name=".PairingInputService"

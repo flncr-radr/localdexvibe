@@ -28,7 +28,15 @@ class AdbMdns(
         if (running) return
         running = true
         if (!registered) {
-            nsdManager.discoverServices(serviceType, NsdManager.PROTOCOL_DNS_SD, listener)
+            try {
+                nsdManager.discoverServices(serviceType, NsdManager.PROTOCOL_DNS_SD, listener)
+            } catch (e: SecurityException) {
+                // Missing NEARBY_WIFI_DEVICES (declared in the manifest, but still a
+                // runtime grant on API 33+). MainActivity requests it on launch;
+                // this only fires if the user denied it.
+                Log.w(TAG, "Cannot discover the pairing service without NEARBY_WIFI_DEVICES", e)
+                running = false
+            }
         }
     }
 

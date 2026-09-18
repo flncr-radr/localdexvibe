@@ -9,11 +9,19 @@ android {
 
     defaultConfig {
         applicationId = "com.localdex"
-        // Android 11 - Required for Wireless Debugging
-        minSdk = 30
-        // Same reasoning as anyapk: sideloaded app, staying at 30 keeps the pairing
-        // and DeX foreground services off the API 34 typed-FGS rules.
-        targetSdk = 30
+        // The Galaxy S23 (One UI 5.1) is the oldest hardware/OS combination this
+        // app targets, and it launched on Android 13.
+        minSdk = 33
+        // Kept at 33 rather than jumping to 34: Android 14 makes a
+        // foregroundServiceType mandatory for every foreground service once
+        // targeted, and nothing in Android's fixed list of types accurately
+        // describes what DexService does (it's not MediaProjection — no
+        // MediaProjection API is used here — and none of the others fit either).
+        // Targeting exactly 33 still means adopting Android 13's real runtime
+        // permission model (POST_NOTIFICATIONS, NEARBY_WIFI_DEVICES) — minSdk 33
+        // means every supported device needs it anyway — without that separate,
+        // harder migration.
+        targetSdk = 33
         versionCode = 1
         versionName = "0.1.0"
 

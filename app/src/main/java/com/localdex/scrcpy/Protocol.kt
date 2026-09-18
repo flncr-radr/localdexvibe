@@ -30,6 +30,45 @@ internal object ScrcpyProtocol {
     /** Finger travel (in video px) equal to one scroll-wheel notch. */
     const val SCROLL_PX_PER_TICK = 64f
 
+    /** Control message type for SET_CLIPBOARD (client → device). */
+    const val TYPE_SET_CLIPBOARD = 9
+
+    /** Device message types (device → client), read off the same control socket. */
+    const val DEVICE_MSG_TYPE_CLIPBOARD = 0
+    const val DEVICE_MSG_TYPE_ACK_CLIPBOARD = 1
+    const val DEVICE_MSG_TYPE_UHID_OUTPUT = 2
+
+    /**
+     * scrcpy's own cap on SET_CLIPBOARD's text field: SC_CONTROL_MSG_MAX_SIZE
+     * (1 << 18) minus the 14 bytes the rest of that message occupies.
+     */
+    const val MAX_CLIPBOARD_TEXT_BYTES = 262_130
+
+    /**
+     * Sanity bound on an incoming device clipboard message's length prefix — large
+     * enough for any real clipboard, small enough to reject a corrupted or desynced
+     * stream rather than attempt a huge allocation on its say-so.
+     */
+    const val MAX_DEVICE_CLIPBOARD_BYTES = 4 * 1024 * 1024
+
+    fun isPlausibleDeviceClipboardLength(len: Int): Boolean =
+        len in 0..MAX_DEVICE_CLIPBOARD_BYTES
+
+    /**
+     * Encodes [text] as UTF-8, truncated to at most [maxBytes] without splitting a
+     * multi-byte code point — a naive byte-array cut can leave a dangling lead byte
+     * that turns the whole string invalid rather than just losing its tail.
+     */
+    fun truncateUtf8(text: String, maxBytes: Int): ByteArray {
+        val full = text.toByteArray(Charsets.UTF_8)
+        if (full.size <= maxBytes) return full
+        var end = maxBytes
+        // Continuation bytes look like 10xxxxxx; back off until `end` lands on the
+        // start of a character (or 0), never mid-sequence.
+        while (end > 0 && (full[end].toInt() and 0xC0) == 0x80) end--
+        return full.copyOf(end)
+    }
+
     fun readInt(data: ByteArray, offset: Int): Int {
         return ((data[offset].toInt() and 0xff) shl 24) or
             ((data[offset + 1].toInt() and 0xff) shl 16) or

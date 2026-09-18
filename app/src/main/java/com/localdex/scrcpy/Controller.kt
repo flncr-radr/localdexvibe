@@ -3,14 +3,19 @@ package com.localdex.scrcpy
 import android.util.Log
 import android.view.KeyEvent
 import android.view.MotionEvent
+import java.io.DataInputStream
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
 import java.nio.ByteBuffer
 import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.atomic.AtomicLong
 
 /**
- * Sends scrcpy control messages (v4.1 wire format) and drains device messages.
+ * Sends scrcpy control messages (v4.1 wire format) and reads device messages back
+ * — clipboard changes in particular; clipboard-set acks and UHID output are parsed
+ * (their byte counts have to be consumed to keep the stream in sync) but otherwise
+ * ignored, since nothing here creates a UHID device or needs paste correlation.
  *
  * Touch input is translated to MOUSE events (scrcpy's "sdk mouse" model:
  * pointerId -1, hover moves, button state), not finger touches. This matters:
@@ -40,9 +45,18 @@ class Controller(
     }
 
     private val queue = LinkedBlockingQueue<ByteArray>()
+    private val clipboardSequence = AtomicLong(0)
 
     @Volatile
     private var running = true
+
+    /**
+     * Set by the viewer while it's in the foreground; delivers the device's
+     * clipboard text whenever it changes. Read on [receiverThread] — the callback
+     * itself must hop to the UI thread for anything Android requires it on.
+     */
+    @Volatile
+    var onClipboardReceived: ((String) -> Unit)? = null
 
     private val senderThread = Thread({
         try {
@@ -58,22 +72,13 @@ class Controller(
         }
     }, "localdex-control-send")
 
-    // The server pushes device messages (clipboard etc.) on this socket; they must be
-    // consumed or the server's writer eventually blocks. We have no use for them.
-    private val drainThread = Thread({
-        val buffer = ByteArray(4096)
-        try {
-            while (running && input.read(buffer) != -1) {
-                // Discard.
-            }
-        } catch (e: IOException) {
-            // Socket closed; done.
-        }
-    }, "localdex-control-drain")
+    // The server pushes device messages (clipboard changes, clipboard-set acks) on
+    // this socket; they must be consumed or the server's writer eventually blocks.
+    private val receiverThread = Thread({ runDeviceMessageReader() }, "localdex-control-recv")
 
     fun start() {
         senderThread.start()
-        drainThread.start()
+        receiverThread.start()
     }
 
     fun stop() {
@@ -83,17 +88,43 @@ class Controller(
 
     /** Sends a full key press (down + up) to the mirrored display's focus. */
     fun sendKeyPress(keycode: Int) {
-        sendKey(KeyEvent.ACTION_DOWN, keycode)
-        sendKey(KeyEvent.ACTION_UP, keycode)
+        sendKey(KeyEvent.ACTION_DOWN, keycode, repeat = 0, metaState = 0)
+        sendKey(KeyEvent.ACTION_UP, keycode, repeat = 0, metaState = 0)
     }
 
-    private fun sendKey(action: Int, keycode: Int) {
+    /**
+     * Forwards a real key event as-is — a hardware/Bluetooth keyboard's presses and
+     * releases, modifiers included. Android already stamps [metaState] with
+     * whichever modifiers are currently held on every KeyEvent it delivers, so a
+     * Ctrl/Shift/Alt combination just works without this app computing it.
+     */
+    fun sendKeyEvent(action: Int, keycode: Int, repeat: Int, metaState: Int) {
+        sendKey(action, keycode, repeat, metaState)
+    }
+
+    private fun sendKey(action: Int, keycode: Int, repeat: Int, metaState: Int) {
         val buffer = ByteBuffer.allocate(14)
         buffer.put(TYPE_INJECT_KEYCODE.toByte())
         buffer.put(action.toByte())
         buffer.putInt(keycode)
-        buffer.putInt(0) // repeat
-        buffer.putInt(0) // metaState
+        buffer.putInt(repeat)
+        buffer.putInt(metaState)
+        queue.offer(buffer.array())
+    }
+
+    /**
+     * Pushes [text] into the mirrored display's own clipboard without also
+     * injecting a paste — the point is that a later Ctrl+V from a real keyboard
+     * finds it there, not that this call pastes anything itself.
+     */
+    fun sendClipboard(text: String) {
+        val textBytes = ScrcpyProtocol.truncateUtf8(text, ScrcpyProtocol.MAX_CLIPBOARD_TEXT_BYTES)
+        val buffer = ByteBuffer.allocate(1 + 8 + 1 + 4 + textBytes.size)
+        buffer.put(ScrcpyProtocol.TYPE_SET_CLIPBOARD.toByte())
+        buffer.putLong(clipboardSequence.getAndIncrement())
+        buffer.put(0) // paste = false
+        buffer.putInt(textBytes.size)
+        buffer.put(textBytes)
         queue.offer(buffer.array())
     }
 
@@ -245,4 +276,41 @@ class Controller(
         }
     }
 
+    /**
+     * Reads device messages (clipboard changes, clipboard-set acks, UHID output)
+     * until the socket closes. Every type has to be parsed and its exact byte count
+     * consumed, even ones we don't act on — anything left unread desyncs every
+     * message that follows it on this stream.
+     */
+    private fun runDeviceMessageReader() {
+        try {
+            val dis = DataInputStream(input)
+            while (running) {
+                when (val type = dis.readUnsignedByte()) {
+                    ScrcpyProtocol.DEVICE_MSG_TYPE_CLIPBOARD -> {
+                        val len = dis.readInt()
+                        if (!ScrcpyProtocol.isPlausibleDeviceClipboardLength(len)) {
+                            throw IOException("Implausible clipboard length $len — stream out of sync")
+                        }
+                        val bytes = ByteArray(len)
+                        dis.readFully(bytes)
+                        onClipboardReceived?.invoke(String(bytes, Charsets.UTF_8))
+                    }
+                    ScrcpyProtocol.DEVICE_MSG_TYPE_ACK_CLIPBOARD -> {
+                        // 8-byte sequence number. Unused: we don't correlate a
+                        // paste with its ack, we just fire-and-forget sync.
+                        dis.readLong()
+                    }
+                    ScrcpyProtocol.DEVICE_MSG_TYPE_UHID_OUTPUT -> {
+                        dis.readUnsignedShort() // device id
+                        val size = dis.readUnsignedShort()
+                        dis.skipBytes(size)
+                    }
+                    else -> throw IOException("Unknown device message type $type — stream out of sync")
+                }
+            }
+        } catch (e: IOException) {
+            if (running) Log.w(TAG, "Device message reader stopped", e)
+        }
+    }
 }

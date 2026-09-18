@@ -181,4 +181,64 @@ class ScrcpyProtocolTest {
         assertFalse(WindowingMode.isFreeform("Display 5: windowing mode: 1"))
         assertFalse(WindowingMode.isFreeform("display id=5 mode=1"))
     }
+
+    // -- Clipboard sync -----------------------------------------------------------
+
+    @Test
+    fun `truncateUtf8 leaves short text untouched`() {
+        val bytes = ScrcpyProtocol.truncateUtf8("hello", 100)
+        assertEquals("hello", String(bytes, Charsets.UTF_8))
+    }
+
+    @Test
+    fun `truncateUtf8 is a no-op at exactly the limit`() {
+        val text = "hello"
+        val bytes = ScrcpyProtocol.truncateUtf8(text, text.toByteArray(Charsets.UTF_8).size)
+        assertEquals(text, String(bytes, Charsets.UTF_8))
+    }
+
+    @Test
+    fun `truncateUtf8 cuts cleanly on an ascii boundary`() {
+        val bytes = ScrcpyProtocol.truncateUtf8("hello world", 5)
+        assertEquals("hello", String(bytes, Charsets.UTF_8))
+    }
+
+    /**
+     * "café" is c-a-f (1 byte each) then é as a 2-byte UTF-8 sequence (0xC3 0xA9).
+     * A naive cut at 4 bytes would keep the lead byte of é and drop its
+     * continuation byte, producing invalid UTF-8. The whole character must be
+     * dropped instead.
+     */
+    @Test
+    fun `truncateUtf8 never splits a multi-byte character`() {
+        val text = "café"
+        val fullBytes = text.toByteArray(Charsets.UTF_8)
+        assertEquals(5, fullBytes.size) // sanity-check the fixture itself
+
+        val bytes = ScrcpyProtocol.truncateUtf8(text, 4)
+
+        assertEquals("caf", String(bytes, Charsets.UTF_8))
+        // And what came out must itself be valid, re-decodable UTF-8 — not just
+        // "some bytes that happen to stringify without throwing".
+        assertTrue(bytes.toString(Charsets.UTF_8).toByteArray(Charsets.UTF_8).contentEquals(bytes))
+    }
+
+    @Test
+    fun `truncateUtf8 handles an empty string`() {
+        assertEquals(0, ScrcpyProtocol.truncateUtf8("", 10).size)
+    }
+
+    @Test
+    fun `truncateUtf8 handles a limit of zero`() {
+        assertEquals(0, ScrcpyProtocol.truncateUtf8("hello", 0).size)
+    }
+
+    @Test
+    fun `device clipboard length is bounded`() {
+        assertTrue(ScrcpyProtocol.isPlausibleDeviceClipboardLength(0))
+        assertTrue(ScrcpyProtocol.isPlausibleDeviceClipboardLength(1024))
+        assertTrue(ScrcpyProtocol.isPlausibleDeviceClipboardLength(ScrcpyProtocol.MAX_DEVICE_CLIPBOARD_BYTES))
+        assertFalse(ScrcpyProtocol.isPlausibleDeviceClipboardLength(-1))
+        assertFalse(ScrcpyProtocol.isPlausibleDeviceClipboardLength(ScrcpyProtocol.MAX_DEVICE_CLIPBOARD_BYTES + 1))
+    }
 }

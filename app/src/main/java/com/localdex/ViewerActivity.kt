@@ -1,6 +1,9 @@
 package com.localdex
 
 import android.annotation.SuppressLint
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.os.Bundle
 import android.view.KeyEvent
 import android.view.SurfaceHolder
@@ -26,21 +29,48 @@ import kotlinx.coroutines.launch
 /**
  * Fullscreen interactive view of the DeX display.
  *
- * Touch is forwarded to the mirrored display; the system Back gesture/button is
- * forwarded as a DeX Back key. Closing happens through the swipe-up panel's Stop
- * button (with confirmation) or the persistent notification's Stop action.
+ * Touch and a real hardware/Bluetooth keyboard are both forwarded to the mirrored
+ * display; the system Back gesture/button is forwarded as a DeX Back key. Closing
+ * happens through the swipe-up panel's Stop button (with confirmation) or the
+ * persistent notification's Stop action.
  */
 class ViewerActivity : AppCompatActivity() {
+
+    companion object {
+        /** Kept local to the phone rather than forwarded to DeX. */
+        private val LOCAL_KEYCODES = setOf(
+            KeyEvent.KEYCODE_VOLUME_UP,
+            KeyEvent.KEYCODE_VOLUME_DOWN,
+            KeyEvent.KEYCODE_VOLUME_MUTE,
+        )
+    }
 
     private lateinit var root: CoordinatorLayout
     private lateinit var surfaceView: SurfaceView
     private lateinit var statusText: TextView
     private lateinit var controlPanel: View
     private lateinit var viewerStopButton: Button
+    private lateinit var clipboardManager: ClipboardManager
 
     private var surfaceReady = false
     private var surfaceGivenToDecoder = false
     private var freeformWarningWatchStarted = false
+
+    /**
+     * The last text either sent to, or received from, the device's clipboard —
+     * checked in both directions before acting, so setting the phone's clipboard
+     * from a device change doesn't immediately echo back to the device, and vice
+     * versa.
+     */
+    @Volatile
+    private var lastSyncedClipboard: String? = null
+
+    private val clipListener = ClipboardManager.OnPrimaryClipChangedListener {
+        val text = currentClipboardText() ?: return@OnPrimaryClipChangedListener
+        if (text == lastSyncedClipboard) return@OnPrimaryClipChangedListener
+        lastSyncedClipboard = text
+        session?.controller?.sendClipboard(text)
+    }
 
     private val session: ScrcpySession?
         get() = ScrcpySession.current
@@ -61,6 +91,7 @@ class ViewerActivity : AppCompatActivity() {
         statusText = findViewById(R.id.viewerStatus)
         controlPanel = findViewById(R.id.controlPanel)
         viewerStopButton = findViewById(R.id.viewerStopButton)
+        clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
 
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         hideSystemBars()
@@ -112,6 +143,7 @@ class ViewerActivity : AppCompatActivity() {
                         applyAspectRatio(state.videoWidth, state.videoHeight)
                         offerSurface()
                         watchFreeformResult()
+                        attachClipboardBridge()
                     }
                     is ScrcpySession.State.Stopped -> {
                         if (state.error != null) {
@@ -136,6 +168,28 @@ class ViewerActivity : AppCompatActivity() {
         val decoder = session?.videoDecoder ?: return
         decoder.setSurface(surfaceView.holder.surface)
         surfaceGivenToDecoder = true
+    }
+
+    /**
+     * Wires the device→phone half of clipboard sync once the session has a
+     * Controller. Safe to call repeatedly (from both onResume and the state
+     * collector) — it's a plain reassignment, not a subscription that would stack.
+     */
+    private fun attachClipboardBridge() {
+        session?.controller?.onClipboardReceived = { text ->
+            if (text != lastSyncedClipboard) {
+                lastSyncedClipboard = text
+                runOnUiThread {
+                    clipboardManager.setPrimaryClip(ClipData.newPlainText("DeX clipboard", text))
+                }
+            }
+        }
+    }
+
+    private fun currentClipboardText(): String? {
+        val clip = clipboardManager.primaryClip ?: return null
+        if (clip.itemCount == 0) return null
+        return clip.getItemAt(0).coerceToText(this)?.toString()?.takeIf { it.isNotEmpty() }
     }
 
     /**
@@ -195,17 +249,32 @@ class ViewerActivity : AppCompatActivity() {
             .show()
     }
 
-    // Forward Back (hardware key and gesture alike) to DeX instead of leaving the
-    // viewer; leaving is done via the swipe-up panel's Stop button, Home, or the
-    // notification.
-    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
-        if (keyCode == KeyEvent.KEYCODE_BACK) {
-            session?.controller?.sendKeyPress(KeyEvent.KEYCODE_BACK)
+    /**
+     * Forwards every real key event — a Bluetooth/USB keyboard's presses and
+     * releases, modifiers included — to DeX instead of letting the phone act on
+     * them. Android already stamps each event's metaState with whichever modifiers
+     * are currently held, so Ctrl/Shift/Alt combinations just work without this
+     * activity computing them.
+     *
+     * Volume keys are left local so the phone's own volume stays reachable. A
+     * hardware/3-button-nav Back key is forwarded like any other key here; gesture
+     * nav's Back has no KeyEvent at all and is handled separately below.
+     */
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.keyCode in LOCAL_KEYCODES) {
+            return super.dispatchKeyEvent(event)
+        }
+        if (event.action == KeyEvent.ACTION_DOWN || event.action == KeyEvent.ACTION_UP) {
+            session?.controller?.sendKeyEvent(event.action, event.keyCode, event.repeatCount, event.metaState)
             return true
         }
-        return super.onKeyDown(keyCode, event)
+        return super.dispatchKeyEvent(event)
     }
 
+    // Forwarded to DeX instead of leaving the viewer; leaving is done via the
+    // swipe-up panel's Stop button, Home, or the notification. This is gesture
+    // nav's Back path specifically — it never reaches dispatchKeyEvent, since no
+    // KeyEvent is generated for it.
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
         session?.controller?.sendKeyPress(KeyEvent.KEYCODE_BACK)
@@ -214,7 +283,25 @@ class ViewerActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         hideSystemBars()
-        if (session == null) finish()
+        if (session == null) {
+            finish()
+            return
+        }
+        // onCreate() can finish() before clipboardManager is ever assigned (when
+        // there was no session at all); finish() doesn't stop onResume() from still
+        // running once, so this has to be checked rather than assumed.
+        if (::clipboardManager.isInitialized) {
+            clipboardManager.addPrimaryClipChangedListener(clipListener)
+            attachClipboardBridge()
+        }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        if (::clipboardManager.isInitialized) {
+            clipboardManager.removePrimaryClipChangedListener(clipListener)
+        }
+        session?.controller?.onClipboardReceived = null
     }
 
     private fun hideSystemBars() {

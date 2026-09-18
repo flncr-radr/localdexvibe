@@ -7,16 +7,17 @@ import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.view.View
 import android.view.WindowManager
-import android.widget.FrameLayout
-import android.widget.ImageButton
+import android.widget.Button
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.coordinatorlayout.widget.CoordinatorLayout
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.lifecycleScope
+import com.google.android.material.bottomsheet.BottomSheetBehavior
 import com.localdex.scrcpy.ScrcpySession
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
@@ -26,15 +27,16 @@ import kotlinx.coroutines.launch
  * Fullscreen interactive view of the DeX display.
  *
  * Touch is forwarded to the mirrored display; the system Back gesture/button is
- * forwarded as a DeX Back key. Closing happens through the ✕ button (with
- * confirmation) or the persistent notification's Stop action.
+ * forwarded as a DeX Back key. Closing happens through the swipe-up panel's Stop
+ * button (with confirmation) or the persistent notification's Stop action.
  */
 class ViewerActivity : AppCompatActivity() {
 
-    private lateinit var root: FrameLayout
+    private lateinit var root: CoordinatorLayout
     private lateinit var surfaceView: SurfaceView
     private lateinit var statusText: TextView
-    private lateinit var closeButton: ImageButton
+    private lateinit var controlPanel: View
+    private lateinit var viewerStopButton: Button
 
     private var surfaceReady = false
     private var surfaceGivenToDecoder = false
@@ -57,10 +59,16 @@ class ViewerActivity : AppCompatActivity() {
         root = findViewById(R.id.viewerRoot)
         surfaceView = findViewById(R.id.surfaceView)
         statusText = findViewById(R.id.viewerStatus)
-        closeButton = findViewById(R.id.closeButton)
+        controlPanel = findViewById(R.id.controlPanel)
+        viewerStopButton = findViewById(R.id.viewerStopButton)
 
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         hideSystemBars()
+
+        // Starts collapsed to the grip peeking at the bottom edge; drag it up to
+        // reveal the Stop button.
+        BottomSheetBehavior.from(controlPanel).state = BottomSheetBehavior.STATE_COLLAPSED
+        viewerStopButton.setOnClickListener { confirmStop() }
 
         surfaceView.holder.addCallback(object : SurfaceHolder.Callback {
             override fun surfaceCreated(holder: SurfaceHolder) {
@@ -85,8 +93,6 @@ class ViewerActivity : AppCompatActivity() {
             )
             true
         }
-
-        makeCloseButtonDraggable()
 
         // Fold/unfold and rotation change the container size without recreating the
         // activity (configChanges); keep the surface at the video's aspect ratio.
@@ -165,77 +171,11 @@ class ViewerActivity : AppCompatActivity() {
                 containerWidth.toFloat() / videoWidth,
                 containerHeight.toFloat() / videoHeight
             )
-            val params = surfaceView.layoutParams as FrameLayout.LayoutParams
+            val params = surfaceView.layoutParams as CoordinatorLayout.LayoutParams
             params.width = (videoWidth * scale).toInt()
             params.height = (videoHeight * scale).toInt()
             params.gravity = android.view.Gravity.CENTER
             surfaceView.layoutParams = params
-        }
-    }
-
-    /**
-     * Tap: stop dialog. Tap-and-hold: drag the button anywhere — it sits where DeX
-     * draws its window controls, so it has to be able to get out of the way.
-     */
-    @SuppressLint("ClickableViewAccessibility")
-    private fun makeCloseButtonDraggable() {
-        val slop = android.view.ViewConfiguration.get(this).scaledTouchSlop
-        var downRawX = 0f
-        var downRawY = 0f
-        var startTx = 0f
-        var startTy = 0f
-        var dragging = false
-        val startDrag = Runnable {
-            dragging = true
-            closeButton.alpha = 0.9f
-            closeButton.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
-        }
-
-        closeButton.setOnTouchListener { view, event ->
-            when (event.actionMasked) {
-                android.view.MotionEvent.ACTION_DOWN -> {
-                    downRawX = event.rawX
-                    downRawY = event.rawY
-                    startTx = view.translationX
-                    startTy = view.translationY
-                    dragging = false
-                    view.postDelayed(startDrag, 350)
-                    true
-                }
-                android.view.MotionEvent.ACTION_MOVE -> {
-                    val dx = event.rawX - downRawX
-                    val dy = event.rawY - downRawY
-                    if (dragging) {
-                        view.translationX = startTx + dx
-                        view.translationY = startTy + dy
-                    } else if (dx * dx + dy * dy > slop * slop) {
-                        // Moved before the hold completed: not a tap, not a drag.
-                        view.removeCallbacks(startDrag)
-                    }
-                    true
-                }
-                android.view.MotionEvent.ACTION_UP -> {
-                    view.removeCallbacks(startDrag)
-                    val dx = event.rawX - downRawX
-                    val dy = event.rawY - downRawY
-                    if (dragging) {
-                        dragging = false
-                        view.alpha = 0.5f
-                    } else if (dx * dx + dy * dy <= slop * slop) {
-                        confirmStop()
-                    }
-                    true
-                }
-                android.view.MotionEvent.ACTION_CANCEL -> {
-                    view.removeCallbacks(startDrag)
-                    if (dragging) {
-                        dragging = false
-                        view.alpha = 0.5f
-                    }
-                    true
-                }
-                else -> false
-            }
         }
     }
 
@@ -256,7 +196,8 @@ class ViewerActivity : AppCompatActivity() {
     }
 
     // Forward Back (hardware key and gesture alike) to DeX instead of leaving the
-    // viewer; leaving is done via the ✕ button, Home, or the notification.
+    // viewer; leaving is done via the swipe-up panel's Stop button, Home, or the
+    // notification.
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
         if (keyCode == KeyEvent.KEYCODE_BACK) {
             session?.controller?.sendKeyPress(KeyEvent.KEYCODE_BACK)

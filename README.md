@@ -29,9 +29,11 @@ Pairing is one-time. After the first successful connection LocalDex grants itsel
 ## Usage
 
 - **Display spec** is `WIDTHxHEIGHT/DPI` (default `1920x1440/240`). Lower DPI = more desktop room; higher DPI = bigger UI.
-- **Input is a virtual mouse**: one finger = click and drag (drag window handles to move windows), two fingers = scroll wheel. **Back** (gesture or key) is forwarded to DeX.
+- **Input is a virtual mouse**: one finger = click and drag (drag window handles to move windows), two fingers = scroll wheel — or **right-click** if they lift again without moving (a stationary two-finger tap). **Back** (gesture or key) is forwarded to DeX.
 - A small handle peeks from the right edge — **tap it** to reveal the window controls (**◀ Left**, **Right ▶**, **Window / Full**) and **Stop** (with confirmation), tap again to hide them. The handle is excluded from the system's edge-swipe gesture so a swipe near it doesn't steal the tap. Its vertical position (default 1/3 up from the bottom) is adjustable on the main screen under **Exit tab position**.
-- Leave the viewer with Home; the session keeps running. Return (or stop) via the **LocalDex notification** — the notification's *Stop* action always ends the session, even if the viewer is gone.
+- **Show Stats** in the side tab overlays live fps, resolution, and how long the overlay's been open, top-left — a quick way to tell whether something feels slow because it *is* slow.
+- Leave the viewer with Home; the session keeps running. Return (or stop) via the **LocalDex notification** — the notification's *Stop* action always ends the session, even if the viewer is gone. A **Quick Settings tile** ("LocalDex") does the same start/stop in one tap without opening the app, assuming you've paired at least once already.
+- **Copy Diagnostics** on the main screen puts a text report (app/device info, connection and session state, this app's own recent log lines) on the clipboard — paste it into a bug report instead of a screenshot and a description.
 
 ## Viewing DeX from a computer
 
@@ -75,5 +77,6 @@ adb shell settings put global verifier_verify_adb_installs 1
 ## Notes & limitations
 
 - Wireless debugging turns itself off on reboot; LocalDex re-enables it automatically once it holds `WRITE_SECURE_SETTINGS` (see Setup), otherwise flip it on manually in Developer options.
+- The one device-wide setting LocalDex changes (`enable_freeform_support`, needed for windowed apps) is restored to whatever it was before, when the session stops — not left changed for the rest of the phone.
 - Audio stays on the phone (not routed through the session).
 - One session at a time.

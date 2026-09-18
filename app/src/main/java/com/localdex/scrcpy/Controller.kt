@@ -37,9 +37,6 @@ class Controller(
 
         private const val POINTER_ID_MOUSE = -1L
         private const val BUTTON_PRIMARY = 1 // MotionEvent.BUTTON_PRIMARY
-
-        /** Finger travel (in video px) equal to one scroll-wheel notch. */
-        private const val SCROLL_PX_PER_TICK = 64f
     }
 
     private val queue = LinkedBlockingQueue<ByteArray>()
@@ -118,7 +115,7 @@ class Controller(
         buffer.putInt(y)
         buffer.putShort(videoWidth.toShort())
         buffer.putShort(videoHeight.toShort())
-        buffer.putShort(pressureToU16FixedPoint(pressure))
+        buffer.putShort(ScrcpyProtocol.pressureToU16FixedPoint(pressure))
         buffer.putInt(actionButton)
         buffer.putInt(buttons)
         queue.offer(buffer.array())
@@ -138,8 +135,8 @@ class Controller(
         buffer.putInt(y)
         buffer.putShort(videoWidth.toShort())
         buffer.putShort(videoHeight.toShort())
-        buffer.putShort(scrollToI16FixedPoint(hScroll))
-        buffer.putShort(scrollToI16FixedPoint(vScroll))
+        buffer.putShort(ScrcpyProtocol.scrollToI16FixedPoint(hScroll))
+        buffer.putShort(ScrcpyProtocol.scrollToI16FixedPoint(vScroll))
         buffer.putInt(0) // buttons
         queue.offer(buffer.array())
     }
@@ -217,8 +214,8 @@ class Controller(
                         if (dx != 0 || dy != 0) {
                             sendScroll(
                                 cx, cy, videoWidth, videoHeight,
-                                dx / SCROLL_PX_PER_TICK,
-                                dy / SCROLL_PX_PER_TICK,
+                                dx / ScrcpyProtocol.SCROLL_PX_PER_TICK,
+                                dy / ScrcpyProtocol.SCROLL_PX_PER_TICK,
                             )
                             lastX = cx
                             lastY = cy
@@ -248,14 +245,4 @@ class Controller(
         }
     }
 
-    private fun pressureToU16FixedPoint(pressure: Float): Short {
-        val clamped = pressure.coerceIn(0f, 1f)
-        return if (clamped == 1f) 0xffff.toShort() else (clamped * 0x10000).toInt().toShort()
-    }
-
-    /** The wire encodes scroll values as i16 fixed point over the range [-16, 16]. */
-    private fun scrollToI16FixedPoint(value: Float): Short {
-        val clamped = (value / 16f).coerceIn(-1f, 1f)
-        return if (clamped == 1f) 0x7fff.toShort() else (clamped * 0x8000).toInt().coerceIn(-0x8000, 0x7fff).toShort()
-    }
 }

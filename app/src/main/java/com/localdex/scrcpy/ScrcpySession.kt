@@ -43,7 +43,6 @@ class ScrcpySession(
         private const val CONNECT_RETRIES = 40
         private const val CONNECT_RETRY_DELAY_MS = 250L
 
-        private const val WINDOWING_MODE_FREEFORM = 5
         private const val FREEFORM_FORCE_ATTEMPTS = 5
         private const val FREEFORM_FORCE_RETRY_DELAY_MS = 300L
 
@@ -120,11 +119,6 @@ class ScrcpySession(
 
     /** Tail of the server's stdout/stderr, kept for error reporting. */
     private val serverLog = StringBuilder()
-
-    private val displayIdPattern = Regex("New display: .*\\(id=(\\d+)\\)")
-    // Device output for `wm get-display-windowing-mode` isn't a documented, stable
-    // format (some builds print the int, some the WINDOWING_MODE_* name) — match both.
-    private val freeformReplyPattern = Regex("\\bFREEFORM\\b|\\b$WINDOWING_MODE_FREEFORM\\b", RegexOption.IGNORE_CASE)
 
     fun start() {
         scope.launch {
@@ -272,7 +266,7 @@ class ScrcpySession(
 
     private fun parseDisplayId(log: String) {
         if (displayId != -1) return
-        val id = displayIdPattern.find(log)?.groupValues?.get(1)?.toIntOrNull() ?: return
+        val id = ScrcpyProtocol.parseDisplayId(log) ?: return
         displayId = id
         Log.i(TAG, "Virtual display id: $id")
         forceFreeform(id)
@@ -298,9 +292,9 @@ class ScrcpySession(
                 val manager = this@ScrcpySession.manager ?: return@launch
                 repeat(FREEFORM_FORCE_ATTEMPTS) { attempt ->
                     try {
-                        Adb.runShell(manager, "wm set-display-windowing-mode -d $id $WINDOWING_MODE_FREEFORM")
+                        Adb.runShell(manager, "wm set-display-windowing-mode -d $id ${WindowingMode.FREEFORM}")
                         val reply = Adb.runShell(manager, "wm get-display-windowing-mode -d $id")
-                        if (freeformReplyPattern.containsMatchIn(reply)) {
+                        if (WindowingMode.isFreeform(reply)) {
                             Log.i(TAG, "Forced freeform on display $id (attempt ${attempt + 1}): $reply")
                             return@launch
                         }

@@ -65,6 +65,8 @@ class ViewerActivity : AppCompatActivity() {
     private lateinit var statusText: TextView
     private lateinit var controlPanel: View
     private lateinit var controlPanelHandle: View
+    private lateinit var viewerSnapLeftButton: Button
+    private lateinit var viewerSnapRightButton: Button
     private lateinit var viewerRestoreButton: Button
     private lateinit var viewerStopButton: Button
     private lateinit var clipboardManager: ClipboardManager
@@ -110,6 +112,8 @@ class ViewerActivity : AppCompatActivity() {
         statusText = findViewById(R.id.viewerStatus)
         controlPanel = findViewById(R.id.controlPanel)
         controlPanelHandle = findViewById(R.id.controlPanelHandle)
+        viewerSnapLeftButton = findViewById(R.id.viewerSnapLeftButton)
+        viewerSnapRightButton = findViewById(R.id.viewerSnapRightButton)
         viewerRestoreButton = findViewById(R.id.viewerRestoreButton)
         viewerStopButton = findViewById(R.id.viewerStopButton)
         clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -118,6 +122,8 @@ class ViewerActivity : AppCompatActivity() {
         hideSystemBars()
 
         setupControlPanel()
+        viewerSnapLeftButton.setOnClickListener { triggerSnap(WindowSnap.Direction.LEFT) }
+        viewerSnapRightButton.setOnClickListener { triggerSnap(WindowSnap.Direction.RIGHT) }
         viewerRestoreButton.setOnClickListener { triggerSnap(WindowSnap.Direction.TOGGLE) }
         viewerStopButton.setOnClickListener { confirmStop() }
 
@@ -360,7 +366,7 @@ class ViewerActivity : AppCompatActivity() {
         lifecycleScope.launch {
             val message = try {
                 when (activeSession.snapWindow(direction)) {
-                    WindowSnap.Result.MAXIMIZED, WindowSnap.Result.RESTORED, null -> null
+                    WindowSnap.Result.MOVED, null -> null
                     WindowSnap.Result.NO_MATCHING_TASK ->
                         "Couldn't tell which DeX window to move."
                 }

@@ -65,10 +65,49 @@
             android:layout_height="wrap_content"
             android:orientation="vertical">
 
+            <!-- Side by side so their positions match what they do. -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="8dp"
+                android:orientation="horizontal">
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/viewerSnapLeftButton"
+                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                    android:layout_width="0dp"
+                    android:layout_weight="1"
+                    android:layout_height="48dp"
+                    android:layout_marginEnd="8dp"
+                    android:insetTop="0dp"
+                    android:insetBottom="0dp"
+                    app:cornerRadius="12dp"
+                    app:strokeColor="@color/outline"
+                    android:textAllCaps="false"
+                    android:textSize="14sp"
+                    android:textColor="@color/on_surface"
+                    android:text="◀ Left" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/viewerSnapRightButton"
+                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                    android:layout_width="0dp"
+                    android:layout_weight="1"
+                    android:layout_height="48dp"
+                    android:insetTop="0dp"
+                    android:insetBottom="0dp"
+                    app:cornerRadius="12dp"
+                    app:strokeColor="@color/outline"
+                    android:textAllCaps="false"
+                    android:textSize="14sp"
+                    android:textColor="@color/on_surface"
+                    android:text="Right ▶" />
+            </LinearLayout>
+
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/viewerRestoreButton"
                 style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-                android:layout_width="wrap_content"
+                android:layout_width="match_parent"
                 android:layout_height="48dp"
                 android:paddingHorizontal="20dp"
                 android:insetTop="0dp"
@@ -83,7 +122,7 @@
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/viewerStopButton"
                 style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-                android:layout_width="wrap_content"
+                android:layout_width="match_parent"
                 android:layout_height="48dp"
                 android:layout_marginTop="8dp"
                 android:paddingHorizontal="20dp"

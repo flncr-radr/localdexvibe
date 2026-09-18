@@ -50,8 +50,7 @@ object WindowSnap {
 
     /** What [snap] did, so callers can tell the user when nothing happened. */
     enum class Result {
-        MAXIMIZED,
-        RESTORED,
+        MOVED,
         NO_MATCHING_TASK,
     }
 
@@ -90,7 +89,7 @@ object WindowSnap {
 
         if (resolved == Direction.MAXIMIZE) {
             setWindowingMode(manager, task, displayId, WINDOWING_MODE_FULLSCREEN)
-            return Result.MAXIMIZED
+            return Result.MOVED
         }
 
         // Freeform first, then bounds — the order the resizeTask guard requires.
@@ -101,7 +100,7 @@ object WindowSnap {
             "am task resize ${task.taskId} " +
                 "${bounds.left} ${bounds.top} ${bounds.right} ${bounds.bottom}"
         )
-        return Result.RESTORED
+        return Result.MOVED
     }
 
     private suspend fun setWindowingMode(

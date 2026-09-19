@@ -101,6 +101,22 @@ class Controller(
     }
 
     /**
+     * Sends [keycode] with the Meta (Windows/Command) key held, spelled out the way
+     * a real keyboard would: Meta down, the key down/up carrying the matching
+     * metaState, Meta up. Synthesising only the modified key press — one event with
+     * metaState set and no surrounding Meta key events — is enough for an app
+     * reading `event.isMetaPressed()`, but not for anything tracking the modifier's
+     * own down/up, so this sends the whole sequence.
+     */
+    fun sendMetaKeyPress(keycode: Int) {
+        val meta = KeyEvent.META_META_ON or KeyEvent.META_META_LEFT_ON
+        sendKey(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_META_LEFT, repeat = 0, metaState = meta)
+        sendKey(KeyEvent.ACTION_DOWN, keycode, repeat = 0, metaState = meta)
+        sendKey(KeyEvent.ACTION_UP, keycode, repeat = 0, metaState = meta)
+        sendKey(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_META_LEFT, repeat = 0, metaState = 0)
+    }
+
+    /**
      * Forwards a real key event as-is — a hardware/Bluetooth keyboard's presses and
      * releases, modifiers included. Android already stamps [metaState] with
      * whichever modifiers are currently held on every KeyEvent it delivers, so a

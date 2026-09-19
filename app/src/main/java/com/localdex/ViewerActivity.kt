@@ -33,9 +33,11 @@ import kotlinx.coroutines.launch
  * Fullscreen interactive view of the DeX display.
  *
  * Touch and a real hardware/Bluetooth keyboard are both forwarded to the mirrored
- * display; the system Back gesture/button is forwarded as a DeX Back key. Closing
- * happens through the side control tab's Stop button (with confirmation) or the
- * persistent notification's Stop action.
+ * display; the system Back gesture/button is forwarded as a DeX Back key. The side
+ * control tab carries the rest: window snapping, and stand-ins for DeX's own
+ * taskbar buttons, which ignore injected mouse clicks (see sendKeyToDex). Closing
+ * happens through that tab's Stop button (with confirmation) or the persistent
+ * notification's Stop action.
  */
 class ViewerActivity : AppCompatActivity() {
 
@@ -70,6 +72,9 @@ class ViewerActivity : AppCompatActivity() {
     private lateinit var viewerSnapLeftButton: Button
     private lateinit var viewerSnapRightButton: Button
     private lateinit var viewerRestoreButton: Button
+    private lateinit var viewerBackButton: Button
+    private lateinit var viewerHomeButton: Button
+    private lateinit var viewerShortcutsButton: Button
     private lateinit var viewerStatsButton: Button
     private lateinit var viewerStopButton: Button
     private lateinit var viewerStatsOverlay: TextView
@@ -121,6 +126,9 @@ class ViewerActivity : AppCompatActivity() {
         viewerSnapLeftButton = findViewById(R.id.viewerSnapLeftButton)
         viewerSnapRightButton = findViewById(R.id.viewerSnapRightButton)
         viewerRestoreButton = findViewById(R.id.viewerRestoreButton)
+        viewerBackButton = findViewById(R.id.viewerBackButton)
+        viewerHomeButton = findViewById(R.id.viewerHomeButton)
+        viewerShortcutsButton = findViewById(R.id.viewerShortcutsButton)
         viewerStatsButton = findViewById(R.id.viewerStatsButton)
         viewerStopButton = findViewById(R.id.viewerStopButton)
         viewerStatsOverlay = findViewById(R.id.viewerStatsOverlay)
@@ -133,6 +141,11 @@ class ViewerActivity : AppCompatActivity() {
         viewerSnapLeftButton.setOnClickListener { triggerSnap(WindowSnap.Direction.LEFT) }
         viewerSnapRightButton.setOnClickListener { triggerSnap(WindowSnap.Direction.RIGHT) }
         viewerRestoreButton.setOnClickListener { triggerSnap(WindowSnap.Direction.TOGGLE) }
+        viewerBackButton.setOnClickListener { sendKeyToDex(KeyEvent.KEYCODE_BACK) }
+        viewerHomeButton.setOnClickListener { sendKeyToDex(KeyEvent.KEYCODE_HOME) }
+        viewerShortcutsButton.setOnClickListener {
+            session?.controller?.sendMetaKeyPress(KeyEvent.KEYCODE_SLASH)
+        }
         viewerStatsButton.setOnClickListener { toggleStats() }
         viewerStopButton.setOnClickListener { confirmStop() }
 
@@ -289,8 +302,13 @@ class ViewerActivity : AppCompatActivity() {
             if (root.height > 0) {
                 // The layout centers the panel by default (layout_gravity center_vertical,
                 // i.e. fraction 0.5); this is the offset from that baseline needed to
-                // land at the configured fraction from the bottom instead.
-                view.translationY = (0.5f - panelPositionFraction) * root.height
+                // land at the configured fraction from the bottom instead. Clamped to
+                // the slack a centered panel actually has, so that offset can't push
+                // the panel's far edge off screen — with enough buttons in it the
+                // panel is nearly as tall as the screen and has almost none.
+                val slack = ((root.height - view.height) / 2f).coerceAtLeast(0f)
+                view.translationY = ((0.5f - panelPositionFraction) * root.height)
+                    .coerceIn(-slack, slack)
             }
 
             controlPanelHandle.systemGestureExclusionRects =
@@ -309,6 +327,30 @@ class ViewerActivity : AppCompatActivity() {
         val hiddenOffset = (controlPanel.width - controlPanelHandle.width).toFloat()
         controlPanelExpanded = !controlPanelExpanded
         controlPanel.animate().translationX(if (controlPanelExpanded) 0f else hiddenOffset).start()
+    }
+
+    /**
+     * The LocalDex-side equivalents of DeX's own taskbar cluster. DeX draws a
+     * back/home pair down there, but those glyphs don't react to the mouse events
+     * this app injects, so these send the keys instead — which scrcpy stamps with
+     * the virtual display's id before injecting (Device.injectEvent ->
+     * InputManager.setDisplayId), so they land on DeX rather than on the phone.
+     *
+     * HOME is the "show desktop" one: PhoneWindowManager routes a short press
+     * through handleShortPressOnHome(event.getDisplayId()) -> startDockOrHome(
+     * displayId, ...), so it raises that display's own home — the DeX desktop —
+     * and leaves the phone's launcher alone.
+     *
+     * There is deliberately no third button for DeX's ≡ (window overview /
+     * workspaces). The obvious candidate, KEYCODE_RECENT_APPS, is display-blind in
+     * the framework: PhoneWindowManager hands it to statusbar.showRecentApps()
+     * with no display id at all, so it would pop the *phone's* recents over the
+     * viewer. Samsung documents no shortcut for DeX workspaces either — hence the
+     * Shortcuts button (Meta+/), which opens DeX's own shortcut list so its real
+     * bindings can be read off the device instead of guessed at here.
+     */
+    private fun sendKeyToDex(keycode: Int) {
+        session?.controller?.sendKeyPress(keycode)
     }
 
     private fun confirmStop() {
@@ -435,7 +477,7 @@ class ViewerActivity : AppCompatActivity() {
     // KeyEvent is generated for it.
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
-        session?.controller?.sendKeyPress(KeyEvent.KEYCODE_BACK)
+        sendKeyToDex(KeyEvent.KEYCODE_BACK)
     }
 
     override fun onResume() {

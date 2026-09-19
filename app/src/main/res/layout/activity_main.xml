@@ -257,6 +257,36 @@
             </HorizontalScrollView>
         </LinearLayout>
 
+        <!--
+            An experiment with a real cost either way, so it is a switch rather than
+            a silent default: forcing freeform is what gives windowed apps at all,
+            but it routes DeX down the legacy freeform path where minimize and
+            show-desktop cannot work. See Prefs.getForceFreeform.
+        -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:layout_marginBottom="20dp">
+
+            <com.google.android.material.switchmaterial.SwitchMaterial
+                android:id="@+id/forceFreeformSwitch"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:minHeight="48dp"
+                android:textAllCaps="false"
+                android:textSize="15sp"
+                android:textColor="@color/on_surface"
+                android:text="Force freeform windowing" />
+
+            <TextView
+                android:id="@+id/forceFreeformNote"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textColor="@color/on_surface_variant"
+                android:textSize="12sp" />
+        </LinearLayout>
+
         <com.google.android.material.button.MaterialButton
             android:id="@+id/startButton"
             android:layout_width="match_parent"

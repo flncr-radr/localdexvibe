@@ -19,6 +19,7 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.google.android.material.button.MaterialButtonToggleGroup
+import com.google.android.material.switchmaterial.SwitchMaterial
 import com.localdex.scrcpy.ScrcpySession
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -33,6 +34,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var displaySpecPresetGroup: MaterialButtonToggleGroup
     private lateinit var displaySpecField: EditText
     private lateinit var panelPositionGroup: MaterialButtonToggleGroup
+    private lateinit var forceFreeformSwitch: SwitchMaterial
+    private lateinit var forceFreeformNote: TextView
     private lateinit var startButton: Button
     private lateinit var viewerButton: Button
     private lateinit var stopButton: Button
@@ -57,6 +60,8 @@ class MainActivity : AppCompatActivity() {
         displaySpecPresetGroup = findViewById(R.id.displaySpecPresetGroup)
         displaySpecField = findViewById(R.id.displaySpecField)
         panelPositionGroup = findViewById(R.id.panelPositionGroup)
+        forceFreeformSwitch = findViewById(R.id.forceFreeformSwitch)
+        forceFreeformNote = findViewById(R.id.forceFreeformNote)
         startButton = findViewById(R.id.startButton)
         viewerButton = findViewById(R.id.viewerButton)
         stopButton = findViewById(R.id.stopButton)
@@ -84,6 +89,13 @@ class MainActivity : AppCompatActivity() {
         panelPositionGroup.addOnButtonCheckedListener { _, checkedId, isChecked ->
             if (!isChecked) return@addOnButtonCheckedListener
             PANEL_POSITION_PRESETS[checkedId]?.let { fraction -> Prefs.setPanelPositionFraction(this, fraction) }
+        }
+
+        forceFreeformSwitch.isChecked = Prefs.getForceFreeform(this)
+        updateForceFreeformNote(forceFreeformSwitch.isChecked)
+        forceFreeformSwitch.setOnCheckedChangeListener { _, checked ->
+            Prefs.setForceFreeform(this, checked)
+            updateForceFreeformNote(checked)
         }
 
         refreshButton.setOnClickListener { checkStatus(forceCheck = true) }
@@ -311,6 +323,21 @@ class MainActivity : AppCompatActivity() {
 
         DexService.start(this)
         startActivity(Intent(this, ViewerActivity::class.java))
+    }
+
+    /**
+     * Says what the switch actually trades, because neither position is simply
+     * "better" and the failure mode of the off position (no windows at all) is
+     * worth knowing before a session rather than after.
+     */
+    private fun updateForceFreeformNote(forcing: Boolean) {
+        forceFreeformNote.text = if (forcing) {
+            "On: windowed apps are guaranteed, but DeX takes its legacy freeform path, " +
+                "where its own minimize and show-desktop do nothing. Takes effect next session."
+        } else {
+            "Off: DeX decides for itself, which is what its minimize and show-desktop need. " +
+                "If apps open fullscreen with no window controls, turn this back on."
+        }
     }
 
     /**

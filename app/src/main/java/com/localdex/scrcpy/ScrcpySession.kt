@@ -3,6 +3,7 @@ package com.localdex.scrcpy
 import android.content.Context
 import android.util.Log
 import com.localdex.Adb
+import com.localdex.Prefs
 import io.github.muntashirakon.adb.AbsAdbConnectionManager
 import io.github.muntashirakon.adb.AdbStream
 import kotlinx.coroutines.*
@@ -159,11 +160,16 @@ class ScrcpySession(
         // newly started apps; some builds want a reboot. This is a device-wide
         // setting, not scoped to this session's display, so its original value is
         // captured first and put back in stop() rather than left as 1 forever.
-        try {
-            originalFreeformSetting = Adb.runShell(manager, "settings get global enable_freeform_support").trim()
-            Adb.runShell(manager, "settings put global enable_freeform_support 1")
-        } catch (e: Exception) {
-            Log.w(TAG, "Could not enable freeform windows", e)
+        if (Prefs.getForceFreeform(context)) {
+            try {
+                originalFreeformSetting =
+                    Adb.runShell(manager, "settings get global enable_freeform_support").trim()
+                Adb.runShell(manager, "settings put global enable_freeform_support 1")
+            } catch (e: Exception) {
+                Log.w(TAG, "Could not enable freeform windows", e)
+            }
+        } else {
+            Log.i(TAG, "Freeform forcing off; leaving enable_freeform_support alone")
         }
 
         val scid = Random.nextInt(1, Int.MAX_VALUE)
@@ -291,16 +297,28 @@ class ScrcpySession(
     }
 
     /**
-     * Freeform is not activated on app-created virtual displays on this Android
-     * generation, but the per-display windowing mode (checked before all desktop
-     * mode heuristics in DisplayWindowSettings.getWindowingModeLocked) can simply
-     * be forced. The mode can flip back briefly while the display is still being
-     * registered, so this sets it, verifies it took, and retries a few times
-     * before giving up.
+     * Forces the per-display windowing mode to freeform, when [Prefs.getForceFreeform]
+     * allows it. The mode can flip back briefly while the display is still being
+     * registered, so this sets it, verifies it took, and retries a few times before
+     * giving up.
+     *
+     * Being checked before all desktop-mode heuristics (see
+     * DisplayWindowSettings.getWindowingModeLocked) is what makes this work at all,
+     * and is also its cost: it takes DeX down the legacy freeform path rather than
+     * real desktop windowing, and on that path minimize and show-desktop cannot
+     * work. See Prefs.getForceFreeform for the mechanism.
      */
     private fun forceFreeform(id: Int) {
         scope.launch {
             try {
+                if (!Prefs.getForceFreeform(context)) {
+                    Log.i(
+                        TAG,
+                        "Freeform forcing off; leaving display $id's windowing mode alone so " +
+                            "DeX's own desktop-mode heuristics decide"
+                    )
+                    return@launch
+                }
                 val manager = this@ScrcpySession.manager ?: return@launch
                 repeat(FREEFORM_FORCE_ATTEMPTS) { attempt ->
                     try {

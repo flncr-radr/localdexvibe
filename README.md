@@ -69,7 +69,22 @@ There is deliberately **no button for DeX's ≡** (the window overview / multipl
 Some of DeX's own window management doesn't work here, and these are Samsung's UI rather than anything LocalDex injects — an earlier version of this section wrongly blamed the taskbar for ignoring our clicks, when in fact tapping its ≡ *does* open the desktop selector:
 
 - The **desktop selector** (≡) opens, but with an empty body and inert controls: `+ Desktop` does nothing and it won't dismiss by clicking.
-- **Minimize** in a window's caption does nothing. Maximize and close work. In AOSP's desktop windowing, minimize is `wct.reorder(token, false)` — it reorders the task *behind the display's home task* — so with no home task on the virtual display there is nothing to hide behind. **Copy Diagnostics** now dumps that display's tasks, which is what settles it.
+- **Minimize** in a window's caption does nothing, while maximize and close work.
+
+Both come from the same cause, and it is LocalDex's own doing rather than Samsung's. Forcing the display's windowing mode is checked *before* every desktop-mode heuristic (`DisplayWindowSettings.getWindowingModeLocked`), so it takes DeX down the **legacy freeform** path instead of real desktop windowing. On that path the shell marks each window always-on-top — visible in `dumpsys` as `mAlwaysOnTop=on` on every freeform root task, against `undefined` on the home task — and always-on-top tasks cannot be reordered to the bottom:
+
+```java
+// TaskDisplayArea.positionChildTaskAt
+if (child.isAlwaysOnTop() && !moveToTop) {
+    Slog.w(TAG_WM, "Ignoring move of always-on-top root task=" + this + " to bottom");
+    super.positionChildAt(oldPosition, child, false);
+    return;   // the reorder is discarded
+}
+```
+
+Minimize *is* that reorder (`wct.reorder(token, false)`), so it is a guaranteed no-op; and show-desktop can't work either, since the home task is already visible underneath and can never rise above always-on-top windows. That other on-device DeX apps do not have this problem is what pointed at the forcing rather than at Samsung.
+
+**Force freeform windowing** on the main screen turns the forcing off so DeX decides for itself. It defaults to on, because without it apps may open fullscreen with no window controls at all — that trade is the open question.
 
 ## How it works
 

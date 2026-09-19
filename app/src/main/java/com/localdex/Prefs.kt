@@ -7,6 +7,7 @@ object Prefs {
     private const val KEY_HAS_PAIRED = "has_paired_before"
     private const val KEY_DISPLAY_SPEC = "display_spec"
     private const val KEY_PANEL_POSITION = "panel_position_fraction"
+    private const val KEY_FORCE_FREEFORM = "force_freeform"
 
     const val DEFAULT_DISPLAY_SPEC = "1920x1440/240"
 
@@ -28,6 +29,27 @@ object Prefs {
 
     fun setDisplaySpec(context: Context, spec: String) {
         prefs(context).edit().putString(KEY_DISPLAY_SPEC, spec).apply()
+    }
+
+    /**
+     * Whether to force the display into legacy freeform windowing
+     * (`enable_freeform_support` plus `wm set-display-windowing-mode`).
+     *
+     * Defaults to true because that is what every build so far has shipped, but it
+     * is a hack with a cost: forcing the per-display windowing mode is checked
+     * *before* all desktop-mode heuristics, so it takes DeX down the legacy
+     * freeform path instead of real desktop windowing. On that path the shell marks
+     * every window always-on-top, and always-on-top tasks refuse to be reordered to
+     * the bottom (TaskDisplayArea.positionChildTaskAt logs "Ignoring move of
+     * always-on-top root task ... to bottom") — which is exactly why minimize and
+     * show-desktop do nothing. Turning this off lets DeX decide for itself; whether
+     * windows still float then is the whole point of the experiment.
+     */
+    fun getForceFreeform(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_FORCE_FREEFORM, true)
+
+    fun setForceFreeform(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean(KEY_FORCE_FREEFORM, enabled).apply()
     }
 
     fun getPanelPositionFraction(context: Context): Float =

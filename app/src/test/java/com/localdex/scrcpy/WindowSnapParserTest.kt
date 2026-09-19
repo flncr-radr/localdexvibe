@@ -41,6 +41,35 @@ class WindowSnapParserTest {
           taskId=37: com.example/com.example.MainActivity bounds=[100,80][1400,1100] userId=0 visible=true topActivity=ComponentInfo{com.example/com.example.MainActivity}
     """.trimIndent()
 
+    // -- displaySection ------------------------------------------------------------
+
+    @Test
+    fun `displaySection keeps only the requested display's block, header included`() {
+        val section = WindowSnapParser.displaySection(amStackList, 7)
+        assertTrue(section.contains("RootTask id=37"))
+        assertTrue(section.contains("taskId=37: com.example/com.example.MainActivity"))
+        // The other display's block must not leak in — that is the whole point.
+        assertFalse(section.contains("RootTask id=12"))
+        assertFalse(section.contains("launcher3"))
+    }
+
+    @Test
+    fun `displaySection stops collecting at the next display's header`() {
+        // Display 0 comes first, so its block ends where display 7's header starts;
+        // a parser that only latched the first header would swallow both.
+        val section = WindowSnapParser.displaySection(amStackList, 0)
+        assertTrue(section.contains("RootTask id=12"))
+        assertFalse(section.contains("RootTask id=37"))
+        assertFalse(section.contains("com.example"))
+    }
+
+    @Test
+    fun `displaySection says so rather than returning empty for an absent display`() {
+        val section = WindowSnapParser.displaySection(amStackList, 99)
+        assertTrue(section.contains("no tasks listed"))
+        assertTrue(section.contains("99"))
+    }
+
     // -- parseFocusedPackage -------------------------------------------------------
 
     @Test

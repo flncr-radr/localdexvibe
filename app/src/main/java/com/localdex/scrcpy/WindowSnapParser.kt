@@ -82,6 +82,30 @@ internal object WindowSnapParser {
         return candidates.singleOrNull { it.visible } ?: candidates.singleOrNull()
     }
 
+    /**
+     * Every `am stack list` line belonging to [displayId], header lines included,
+     * verbatim. For the diagnostics report rather than for acting on: when a
+     * window control does nothing, what's actually on the display — whether
+     * there's a home task behind the freeform ones, what windowing mode each is
+     * in — is the thing worth reading, and guessing at it from the symptom is how
+     * this project has gone wrong before. Returns a placeholder rather than an
+     * empty string when the display has no tasks, since "no tasks" is itself a
+     * finding and an empty section looks like a failed command.
+     */
+    fun displaySection(amStackList: String, displayId: Int): String {
+        var currentDisplay: Int? = null
+        val lines = mutableListOf<String>()
+        for (line in amStackList.lineSequence()) {
+            val header = ROOT_TASK_HEADER.find(line)
+            if (header != null) {
+                currentDisplay = header.groupValues[1].toIntOrNull()
+            }
+            if (currentDisplay == displayId) lines += line.trimEnd()
+        }
+        return if (lines.isEmpty()) "(no tasks listed for display $displayId)"
+        else lines.joinToString("\n")
+    }
+
     private fun parseBounds(groups: List<String>): Bounds? {
         val left = groups.getOrNull(3)?.toIntOrNull() ?: return null
         val top = groups.getOrNull(4)?.toIntOrNull() ?: return null

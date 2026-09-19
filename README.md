@@ -33,7 +33,7 @@ Pairing is one-time. After the first successful connection LocalDex grants itsel
 - A small handle peeks from the right edge — **tap it** to reveal the window controls (**◀ Left**, **Right ▶**, **Window / Full**), the DeX taskbar stand-ins (**◁ Back**, **○ Desktop**, **DeX Shortcuts**) and **Stop** (with confirmation), tap again to hide them. The handle is excluded from the system's edge-swipe gesture so a swipe near it doesn't steal the tap. Its vertical position (default 1/3 up from the bottom) is adjustable on the main screen under **Exit tab position**.
 - **Show Stats** in the side tab overlays live fps, resolution, and how long the overlay's been open, top-left — a quick way to tell whether something feels slow because it *is* slow.
 - Leave the viewer with Home; the session keeps running. Return (or stop) via the **LocalDex notification** — the notification's *Stop* action always ends the session, even if the viewer is gone. A **Quick Settings tile** ("LocalDex") does the same start/stop in one tap without opening the app, assuming you've paired at least once already.
-- **Copy Diagnostics** on the main screen puts a text report (app/device info, connection and session state, this app's own recent log lines) on the clipboard — paste it into a bug report instead of a screenshot and a description.
+- **Copy Diagnostics**, on the main screen and in the side tab, puts a text report (app/device info, connection and session state, this app's own recent log lines) on the clipboard — paste it into a bug report instead of a screenshot and a description.
 
 ## Viewing DeX from a computer
 
@@ -57,12 +57,19 @@ Under the hood this changes the window's *windowing mode* (`am start --task <id>
 
 ## DeX's own taskbar buttons
 
-DeX draws its own little cluster in the taskbar's bottom-left corner. Those glyphs don't react to anything LocalDex sends: this app injects *mouse* events (scrcpy's `pointerId -1` model, deliberately — a touchscreen pointer on a window caption crashes One UI's desktop shell), and DeX's taskbar doesn't take them. The side tab has stand-ins that go around it, by injecting keys instead — scrcpy stamps each key event with the virtual display's id (`Device.injectEvent` → `InputManager.setDisplayId`) before injecting, so they land on DeX and not on the phone:
+DeX draws its own little cluster in the taskbar's bottom-left corner. The side tab offers direct equivalents, sent as keys — scrcpy stamps each key event with the virtual display's id (`Device.injectEvent` → `InputManager.setDisplayId`) before injecting, so they land on DeX and not on the phone:
 
 - **◁ Back** — `KEYCODE_BACK`, the same thing the system Back gesture already forwards.
 - **○ Desktop** — `KEYCODE_HOME`. `PhoneWindowManager` routes a short press through `handleShortPressOnHome(event.getDisplayId())` → `startDockOrHome(displayId, …)`, so it raises *that display's* home — the DeX desktop — and leaves the phone's launcher where it was.
 
 There is deliberately **no button for DeX's ≡** (the window overview / multiple desktops). The obvious candidate, `KEYCODE_RECENT_APPS`, is display-blind in the framework — `PhoneWindowManager` hands it straight to `statusbar.showRecentApps()` with no display id at all — so it would pop the *phone's* recents over the viewer rather than doing anything on DeX. Samsung documents no keyboard shortcut for DeX workspaces either. **DeX Shortcuts** (Meta + `/`) is the way in: it opens DeX's own shortcut list on the DeX display, so whatever this build really binds can be read off the device instead of guessed at here.
+
+### Known broken on a virtual display
+
+Some of DeX's own window management doesn't work here, and these are Samsung's UI rather than anything LocalDex injects — an earlier version of this section wrongly blamed the taskbar for ignoring our clicks, when in fact tapping its ≡ *does* open the desktop selector:
+
+- The **desktop selector** (≡) opens, but with an empty body and inert controls: `+ Desktop` does nothing and it won't dismiss by clicking.
+- **Minimize** in a window's caption does nothing. Maximize and close work. In AOSP's desktop windowing, minimize is `wct.reorder(token, false)` — it reorders the task *behind the display's home task* — so with no home task on the virtual display there is nothing to hide behind. **Copy Diagnostics** now dumps that display's tasks, which is what settles it.
 
 ## How it works
 

@@ -152,10 +152,10 @@
                 android:text="Window / Full" />
 
             <!--
-                DeX's own taskbar cluster (≡ / ○ / ◁) doesn't react to the mouse
-                events this app injects, so these drive the same two functions by
-                key injection instead, which scrcpy targets at the virtual display.
-                There is deliberately no ≡ equivalent here — see ViewerActivity.
+                Stand-ins for DeX's own taskbar cluster, driven by key injection
+                (scrcpy targets those at the virtual display) rather than by the
+                mouse events this app injects for everything else. There is
+                deliberately no ≡ equivalent here — see ViewerActivity.
             -->
             <LinearLayout
                 android:layout_width="match_parent"
@@ -226,6 +226,27 @@
                 android:textSize="14sp"
                 android:textColor="@color/on_surface"
                 android:text="Show Stats" />
+
+            <!--
+                Here as well as on the main screen: capturing a report meant leaving
+                the viewer first (swipe up for the nav bar, Home, reopen the app),
+                and the session state is exactly what the report is for.
+            -->
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/viewerDiagnosticsButton"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:layout_marginTop="8dp"
+                android:paddingHorizontal="20dp"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                app:cornerRadius="12dp"
+                app:strokeColor="@color/outline"
+                android:textAllCaps="false"
+                android:textSize="14sp"
+                android:textColor="@color/on_surface"
+                android:text="Copy Diagnostics" />
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/viewerStopButton"

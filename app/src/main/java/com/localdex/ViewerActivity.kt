@@ -23,21 +23,22 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.lifecycleScope
 import com.localdex.scrcpy.ScrcpySession
 import com.localdex.scrcpy.WindowSnap
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Fullscreen interactive view of the DeX display.
  *
  * Touch and a real hardware/Bluetooth keyboard are both forwarded to the mirrored
  * display; the system Back gesture/button is forwarded as a DeX Back key. The side
- * control tab carries the rest: window snapping, and stand-ins for DeX's own
- * taskbar buttons, which ignore injected mouse clicks (see sendKeyToDex). Closing
- * happens through that tab's Stop button (with confirmation) or the persistent
- * notification's Stop action.
+ * control tab carries the rest: window snapping, and direct equivalents of DeX's
+ * own taskbar buttons (see sendKeyToDex). Closing happens through that tab's Stop
+ * button (with confirmation) or the persistent notification's Stop action.
  */
 class ViewerActivity : AppCompatActivity() {
 
@@ -76,6 +77,7 @@ class ViewerActivity : AppCompatActivity() {
     private lateinit var viewerHomeButton: Button
     private lateinit var viewerShortcutsButton: Button
     private lateinit var viewerStatsButton: Button
+    private lateinit var viewerDiagnosticsButton: Button
     private lateinit var viewerStopButton: Button
     private lateinit var viewerStatsOverlay: TextView
     private lateinit var clipboardManager: ClipboardManager
@@ -130,6 +132,7 @@ class ViewerActivity : AppCompatActivity() {
         viewerHomeButton = findViewById(R.id.viewerHomeButton)
         viewerShortcutsButton = findViewById(R.id.viewerShortcutsButton)
         viewerStatsButton = findViewById(R.id.viewerStatsButton)
+        viewerDiagnosticsButton = findViewById(R.id.viewerDiagnosticsButton)
         viewerStopButton = findViewById(R.id.viewerStopButton)
         viewerStatsOverlay = findViewById(R.id.viewerStatsOverlay)
         clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -147,6 +150,7 @@ class ViewerActivity : AppCompatActivity() {
             session?.controller?.sendMetaKeyPress(KeyEvent.KEYCODE_SLASH)
         }
         viewerStatsButton.setOnClickListener { toggleStats() }
+        viewerDiagnosticsButton.setOnClickListener { copyDiagnostics() }
         viewerStopButton.setOnClickListener { confirmStop() }
 
         surfaceView.holder.addCallback(object : SurfaceHolder.Callback {
@@ -330,16 +334,23 @@ class ViewerActivity : AppCompatActivity() {
     }
 
     /**
-     * The LocalDex-side equivalents of DeX's own taskbar cluster. DeX draws a
-     * back/home pair down there, but those glyphs don't react to the mouse events
-     * this app injects, so these send the keys instead — which scrcpy stamps with
-     * the virtual display's id before injecting (Device.injectEvent ->
-     * InputManager.setDisplayId), so they land on DeX rather than on the phone.
+     * The LocalDex-side equivalents of DeX's own taskbar cluster, sent as keys,
+     * which scrcpy stamps with the virtual display's id before injecting
+     * (Device.injectEvent -> InputManager.setDisplayId) so they land on DeX rather
+     * than on the phone.
+     *
+     * These exist as a *reliable* path to those functions, not because the taskbar
+     * is unreachable. An earlier version of this comment claimed DeX's taskbar
+     * ignores the mouse events this app injects; that turned out to be false —
+     * tapping its ≡ does open the desktop selector. What is true is that the
+     * selector then renders empty and its own controls are inert on a virtual
+     * display, which is Samsung's UI misbehaving rather than our clicks missing.
      *
      * HOME is the "show desktop" one: PhoneWindowManager routes a short press
      * through handleShortPressOnHome(event.getDisplayId()) -> startDockOrHome(
-     * displayId, ...), so it raises that display's own home — the DeX desktop —
-     * and leaves the phone's launcher alone.
+     * displayId, ...), so it raises that display's own home — if that display has
+     * one at all, which is exactly what the diagnostics task dump is there to
+     * answer.
      *
      * There is deliberately no third button for DeX's ≡ (window overview /
      * workspaces). The obvious candidate, KEYCODE_RECENT_APPS, is display-blind in
@@ -351,6 +362,24 @@ class ViewerActivity : AppCompatActivity() {
      */
     private fun sendKeyToDex(keycode: Int) {
         session?.controller?.sendKeyPress(keycode)
+    }
+
+    /**
+     * Same report as the main screen's button, reachable without leaving the
+     * viewer — which previously meant swiping up for the nav bar, tapping Home and
+     * reopening the app, and the state worth reporting is a running session's.
+     * Off the main thread: it does ADB round-trips and shells out to `logcat`.
+     */
+    private fun copyDiagnostics() {
+        viewerDiagnosticsButton.isEnabled = false
+        lifecycleScope.launch {
+            val report = withContext(Dispatchers.IO) { Diagnostics.collect(this@ViewerActivity) }
+            clipboardManager.setPrimaryClip(ClipData.newPlainText("LocalDex diagnostics", report))
+            // Keeps the clipboard sync from bouncing this straight back to DeX.
+            lastSyncedClipboard = report
+            Toast.makeText(this@ViewerActivity, "Diagnostics copied", Toast.LENGTH_SHORT).show()
+            viewerDiagnosticsButton.isEnabled = true
+        }
     }
 
     private fun confirmStop() {

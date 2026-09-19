@@ -7,13 +7,16 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.net.wifi.WifiManager
 import android.os.IBinder
+import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import com.localdex.scrcpy.ScrcpySession
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.collectLatest
@@ -26,6 +29,34 @@ import kotlinx.coroutines.launch
 class DexService : Service() {
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+
+    // The collector for the currently-observed session's state. Tracked so a repeated
+    // onStartCommand (e.g. a re-tap before the UI reflects the running state) cancels
+    // the previous collector instead of piling up another one alongside it.
+    private var stateCollectorJob: Job? = null
+
+    // Folding a foldable switches the active display and typically turns the inner
+    // screen off; a DeX session — and the ADB-over-WiFi connection it depends on —
+    // has to keep running through that, not just while the screen is on. Both locks
+    // are non-reference-counted: one acquire in onCreate, one release in onDestroy.
+    private var wakeLock: PowerManager.WakeLock? = null
+    private var wifiLock: WifiManager.WifiLock? = null
+
+    override fun onCreate() {
+        super.onCreate()
+        wakeLock = getSystemService(PowerManager::class.java)
+            .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "com.localdex:DexSession")
+            .apply {
+                setReferenceCounted(false)
+                acquire()
+            }
+        wifiLock = getSystemService(WifiManager::class.java)
+            .createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "com.localdex:DexSession")
+            .apply {
+                setReferenceCounted(false)
+                acquire()
+            }
+    }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
@@ -44,7 +75,8 @@ class DexService : Service() {
                 if (session == null) {
                     shutDown()
                 } else {
-                    serviceScope.launch {
+                    stateCollectorJob?.cancel()
+                    stateCollectorJob = serviceScope.launch {
                         session.state.collectLatest { state ->
                             when (state) {
                                 is ScrcpySession.State.Stopped -> shutDown()
@@ -72,6 +104,8 @@ class DexService : Service() {
         // The service dying must never leave a session (and the overlay display) behind.
         ScrcpySession.current?.stop()
         serviceScope.cancel()
+        wakeLock?.let { if (it.isHeld) it.release() }
+        wifiLock?.let { if (it.isHeld) it.release() }
     }
 
     private fun buildNotification(displayId: Int = -1): Notification {
@@ -124,14 +158,9 @@ class DexService : Service() {
         const val ACTION_STOP = "com.localdex.STOP_DEX"
 
         fun start(context: Context) {
-            if (ScrcpySession.current == null) {
-                val session = ScrcpySession(
-                    context.applicationContext,
-                    Prefs.getDisplaySpec(context),
-                )
-                ScrcpySession.current = session
-                session.start()
-            }
+            // Synchronized in ScrcpySession itself, so overlapping calls (e.g. a
+            // double-tap on "Start DeX") can never create two sessions.
+            ScrcpySession.startIfNeeded(context.applicationContext, Prefs.getDisplaySpec(context))
             ContextCompat.startForegroundService(context, Intent(context, DexService::class.java))
         }
 

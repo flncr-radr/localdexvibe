@@ -3,6 +3,7 @@ package com.localdex.scrcpy
 import android.content.Context
 import android.util.Log
 import com.localdex.Adb
+import com.localdex.Prefs
 import io.github.muntashirakon.adb.AbsAdbConnectionManager
 import io.github.muntashirakon.adb.AdbStream
 import kotlinx.coroutines.*
@@ -43,9 +44,31 @@ class ScrcpySession(
         private const val CONNECT_RETRIES = 40
         private const val CONNECT_RETRY_DELAY_MS = 250L
 
+        private const val FREEFORM_FORCE_ATTEMPTS = 5
+        private const val FREEFORM_FORCE_RETRY_DELAY_MS = 300L
+
+        /** Guards read-check-then-write access to [current] from [startIfNeeded] and [stop]. */
+        private val lock = Any()
+
         /** The one live session, owned by DexService. */
         @Volatile
         var current: ScrcpySession? = null
+            private set
+
+        /**
+         * Starts a new session and installs it as [current], unless one is already
+         * running. Safe to call concurrently: at most one session is ever created for
+         * overlapping calls.
+         */
+        fun startIfNeeded(context: Context, displaySpec: String): ScrcpySession {
+            synchronized(lock) {
+                current?.let { return it }
+                val session = ScrcpySession(context, displaySpec)
+                current = session
+                session.start()
+                return session
+            }
+        }
     }
 
     private val _state = MutableStateFlow<State>(State.Starting("Connecting…"))
@@ -80,10 +103,32 @@ class ScrcpySession(
     var displayId = -1
         private set
 
+    /** True while [forceFreeform] is still trying (or hasn't started yet). */
+    @Volatile
+    var freeformForceInProgress = true
+        private set
+
+    /**
+     * True once forcing freeform mode on [displayId] has been given up on after
+     * [FREEFORM_FORCE_ATTEMPTS] tries. Apps on the display open fullscreen with no
+     * window controls when this is true. Only meaningful once
+     * [freeformForceInProgress] is false.
+     */
+    @Volatile
+    var freeformForceFailed = false
+        private set
+
     /** Tail of the server's stdout/stderr, kept for error reporting. */
     private val serverLog = StringBuilder()
 
-    private val displayIdPattern = Regex("New display: .*\\(id=(\\d+)\\)")
+    /**
+     * `enable_freeform_support`'s value before this session overwrote it, so [stop]
+     * can put it back — "null" (the literal string `settings get` prints for an
+     * unset key) means restoring it means deleting the key, not writing "null".
+     * Null here means we never successfully read/changed it, so there's nothing to
+     * restore.
+     */
+    private var originalFreeformSetting: String? = null
 
     fun start() {
         scope.launch {
@@ -112,11 +157,19 @@ class ScrcpySession(
 
         // "Enable freeform windows" (a standard developer option). Without it, apps on
         // the DeX display open full screen with no window controls. Takes effect for
-        // newly started apps; some builds want a reboot.
-        try {
-            Adb.runShell(manager, "settings put global enable_freeform_support 1")
-        } catch (e: Exception) {
-            Log.w(TAG, "Could not enable freeform windows", e)
+        // newly started apps; some builds want a reboot. This is a device-wide
+        // setting, not scoped to this session's display, so its original value is
+        // captured first and put back in stop() rather than left as 1 forever.
+        if (Prefs.getForceFreeform(context)) {
+            try {
+                originalFreeformSetting =
+                    Adb.runShell(manager, "settings get global enable_freeform_support").trim()
+                Adb.runShell(manager, "settings put global enable_freeform_support 1")
+            } catch (e: Exception) {
+                Log.w(TAG, "Could not enable freeform windows", e)
+            }
+        } else {
+            Log.i(TAG, "Freeform forcing off; leaving enable_freeform_support alone")
         }
 
         val scid = Random.nextInt(1, Int.MAX_VALUE)
@@ -213,11 +266,14 @@ class ScrcpySession(
                     val read = input.read(buffer)
                     if (read <= 0) break
                     val text = String(buffer, 0, read)
-                    synchronized(serverLog) {
+                    val snapshot = synchronized(serverLog) {
                         serverLog.append(text)
                         if (serverLog.length > 8192) serverLog.delete(0, serverLog.length - 8192)
+                        serverLog.toString()
                     }
-                    parseDisplayId(text)
+                    // Scan the accumulated buffer, not just this chunk: the "New
+                    // display" line can straddle two reads.
+                    parseDisplayId(snapshot)
                     Log.i(TAG, "[server] ${text.trim()}")
                 }
             } catch (e: IOException) {
@@ -226,31 +282,94 @@ class ScrcpySession(
         }, "localdex-server-log").start()
     }
 
-    private fun parseDisplayId(logChunk: String) {
+    private fun parseDisplayId(log: String) {
         if (displayId != -1) return
-        val id = displayIdPattern.find(logChunk)?.groupValues?.get(1)?.toIntOrNull() ?: return
+        val id = ScrcpyProtocol.parseDisplayId(log) ?: return
         displayId = id
         Log.i(TAG, "Virtual display id: $id")
-
-        // Freeform is not activated on app-created virtual displays on this Android
-        // generation, but the per-display windowing mode (checked before all desktop
-        // mode heuristics in DisplayWindowSettings.getWindowingModeLocked) can simply
-        // be forced. Mode 5 = WINDOWING_MODE_FREEFORM.
-        scope.launch {
-            try {
-                val manager = this@ScrcpySession.manager ?: return@launch
-                Adb.runShell(manager, "wm set-display-windowing-mode -d $id 5")
-                val check = Adb.runShell(manager, "wm get-display-windowing-mode -d $id")
-                Log.i(TAG, "Windowing mode after force: $check")
-            } catch (e: Exception) {
-                Log.w(TAG, "Could not force freeform on display $id", e)
-            }
-        }
+        forceFreeform(id)
 
         // If video is already running, re-emit so observers pick up the id.
         val current = _state.value
         if (current is State.Running) {
             _state.value = current.copy(displayId = id)
+        }
+    }
+
+    /**
+     * Forces the per-display windowing mode to freeform, when [Prefs.getForceFreeform]
+     * allows it. The mode can flip back briefly while the display is still being
+     * registered, so this sets it, verifies it took, and retries a few times before
+     * giving up.
+     *
+     * Being checked before all desktop-mode heuristics (see
+     * DisplayWindowSettings.getWindowingModeLocked) is what makes this work at all,
+     * and is also its cost: it takes DeX down the legacy freeform path rather than
+     * real desktop windowing, and on that path minimize and show-desktop cannot
+     * work. See Prefs.getForceFreeform for the mechanism.
+     */
+    private fun forceFreeform(id: Int) {
+        scope.launch {
+            try {
+                if (!Prefs.getForceFreeform(context)) {
+                    Log.i(
+                        TAG,
+                        "Freeform forcing off; leaving display $id's windowing mode alone so " +
+                            "DeX's own desktop-mode heuristics decide"
+                    )
+                    return@launch
+                }
+                val manager = this@ScrcpySession.manager ?: return@launch
+                repeat(FREEFORM_FORCE_ATTEMPTS) { attempt ->
+                    try {
+                        Adb.runShell(manager, "wm set-display-windowing-mode -d $id ${WindowingMode.FREEFORM}")
+                        val reply = Adb.runShell(manager, "wm get-display-windowing-mode -d $id")
+                        if (WindowingMode.isFreeform(reply)) {
+                            Log.i(TAG, "Forced freeform on display $id (attempt ${attempt + 1}): $reply")
+                            return@launch
+                        }
+                        Log.w(TAG, "Display $id not yet freeform after attempt ${attempt + 1}: $reply")
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Could not force freeform on display $id (attempt ${attempt + 1})", e)
+                    }
+                    delay(FREEFORM_FORCE_RETRY_DELAY_MS)
+                }
+                freeformForceFailed = true
+                Log.e(
+                    TAG,
+                    "Giving up forcing freeform on display $id after $FREEFORM_FORCE_ATTEMPTS attempts; " +
+                        "apps will open fullscreen with no window controls"
+                )
+            } finally {
+                freeformForceInProgress = false
+            }
+        }
+    }
+
+    /**
+     * Moves the focused window on this session's display between fullscreen and a
+     * bounded window. Returns null if the display id or video size (needed to
+     * compute the target bounds) aren't known yet, or if there is no ADB
+     * connection anymore.
+     */
+    suspend fun snapWindow(direction: WindowSnap.Direction): WindowSnap.Result? {
+        val mgr = manager ?: return null
+        if (displayId == -1 || videoWidth <= 0 || videoHeight <= 0) return null
+        return WindowSnap.snap(mgr, displayId, videoWidth, videoHeight, direction)
+    }
+
+    /** Puts `enable_freeform_support` back to what it was before this session touched it. */
+    private suspend fun restoreFreeformSetting() {
+        val original = originalFreeformSetting ?: return
+        val mgr = manager ?: return
+        try {
+            if (original == "null") {
+                Adb.runShell(mgr, "settings delete global enable_freeform_support")
+            } else {
+                Adb.runShell(mgr, "settings put global enable_freeform_support $original")
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not restore enable_freeform_support to '$original'", e)
         }
     }
 
@@ -264,11 +383,19 @@ class ScrcpySession(
 
     /** Idempotent; safe from any thread. Tears everything down, then reports [error]. */
     fun stop(error: String? = null) {
-        if (!stopped.compareAndSet(false, true)) return
+        // The stopped-check and clearing `current` must be one atomic step under
+        // the same lock startIfNeeded() uses — otherwise a start() on another
+        // thread can slip in between them and be handed a session that has
+        // already committed to stopping.
+        synchronized(lock) {
+            if (!stopped.compareAndSet(false, true)) return
+            if (current === this@ScrcpySession) current = null
+        }
 
         scope.launch {
             videoDecoder?.stop()
             controller?.stop()
+            restoreFreeformSetting()
 
             listOf(videoStream, controlStream, shellStream).forEach { stream ->
                 try {
@@ -285,7 +412,6 @@ class ScrcpySession(
             }
 
             _state.value = State.Stopped(error)
-            if (current === this@ScrcpySession) current = null
             scope.cancel()
         }
     }

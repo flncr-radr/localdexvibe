@@ -72,20 +72,18 @@ Some of DeX's own window management doesn't work here, and these are Samsung's U
 - The **desktop selector** (≡) opens, but with an empty body and inert controls: `+ Desktop` does nothing and it won't dismiss by clicking.
 - **Minimize** in a window's caption hides the window with no way back to it. The task survives — on a device it stayed listed as `taskId=1024: com.android.chrome/… bounds=[288,216][1632,1224] visible=false`, bounds and all — but nothing in DeX's taskbar lists it, so the window is simply gone. The side tab's **Windows** button is the way back.
 
-Both come from the same cause, and it is LocalDex's own doing rather than Samsung's. Forcing the display's windowing mode is checked *before* every desktop-mode heuristic (`DisplayWindowSettings.getWindowingModeLocked`), so it takes DeX down the **legacy freeform** path instead of real desktop windowing. On that path the shell marks each window always-on-top — visible in `dumpsys` as `mAlwaysOnTop=on` on every freeform root task, against `undefined` on the home task — and always-on-top tasks cannot be reordered to the bottom:
+What works, from a device: **Back** on the taskbar, window snapping, minimize (in the sense of hiding), and restoring through the **Windows** list. What doesn't: the taskbar's **○** and **≡**, and dismissing the selector once it is up.
 
-```java
-// TaskDisplayArea.positionChildTaskAt
-if (child.isAlwaysOnTop() && !moveToTop) {
-    Slog.w(TAG_WM, "Ignoring move of always-on-top root task=" + this + " to bottom");
-    super.positionChildAt(oldPosition, child, false);
-    return;   // the reorder is discarded
-}
-```
+`mAlwaysOnTop` on freeform tasks is worth knowing about before reading any `dumpsys` from this app, because it tracks the selector rather than the windowing mode:
 
-Minimize *is* that reorder (`wct.reorder(token, false)`), so it is a guaranteed no-op; and show-desktop can't work either, since the home task is already visible underneath and can never rise above always-on-top windows. That other on-device DeX apps do not have this problem is what pointed at the forcing rather than at Samsung.
+| Desktop selector | Freeform tasks | Home task |
+| --- | --- | --- |
+| open | `mAlwaysOnTop=on` | `undefined` |
+| closed | `mAlwaysOnTop=off` | `undefined` |
 
-**Force freeform windowing** on the main screen turns the forcing off so DeX decides for itself. It defaults to on, because without it apps may open fullscreen with no window controls at all — that trade is the open question.
+Four captures from one device agree on this. It matters because an always-on-top task cannot be reordered to the bottom — `TaskDisplayArea.positionChildTaskAt` discards the move and logs *"Ignoring move of always-on-top root task … to bottom"* — and minimize is exactly that reorder. So **with the selector open, minimize and show-desktop genuinely cannot work**, and any capture taken in that state says more about the selector than about the thing being tested. An earlier version of this section drew a general conclusion from one such capture and got it wrong.
+
+**Force freeform windowing** on the main screen stops LocalDex forcing the display's windowing mode, so DeX decides for itself. Forcing it is checked *before* every desktop-mode heuristic (`DisplayWindowSettings.getWindowingModeLocked`), so it may be taking DeX down the legacy freeform path rather than real desktop windowing — untested either way. It defaults to on, because without it apps may open fullscreen with no window controls at all.
 
 ## How it works
 

@@ -95,7 +95,19 @@ Setting `dex_on_external_display=1` turned out not to be enough on its own: the 
 
 **Use a system display (experimental)** on the main screen does that. Off, scrcpy creates a `VirtualDisplay` this app owns (`new_display=`). On, LocalDex writes the global `overlay_display_devices` setting, waits for the system to create that display through its own `OverlayDisplayAdapter`, and has scrcpy mirror it by id (`display_id=`). The difference is who owns the display: an overlay display is presented to the framework as an ordinary secondary display rather than as an app's virtual one, and "the device never considered this display eligible for DeX" is the best remaining explanation for a display where every plain-framework behaviour works and every DeX-specific one does not.
 
-**It works** — on a device, with this on, DeX engaged for the first time and its taskbar listed running apps, which nothing before had achieved.
+**It works.** On a device, with this on, DeX engaged for the first time: its taskbar listed running apps, and a capture confirmed the two containers that had been missing all along —
+
+```
+Display #11
+  Task{#1116 name=Desk ... mode=freeform visible=true}
+    Task{#1124 type=standard A=com.google.android.apps.messaging rootTaskId=1116 mode=freeform}
+  Task{#1114 type=home I=com.sec.android.app.launcher/com.honeyspace.dexservice.SecondaryLauncher}
+  Task{#1117 name=MinimizedDesk_1116 ... visible=false sz=0}
+```
+
+`Desk` is the container a working DeX parents app windows under, which LocalDex could never produce — here the app sits inside it as a child (`rootTaskId=1116`) rather than as a bare root task. `MinimizedDesk_1116` is DeX's own minimize target, empty in this capture because nothing was minimized. Both exist only because the display was created by the system.
+
+One confound is unresolved: on the reporting device another DeX app's accessibility service (`tech.nobutec.dexprobe.DexOverlayService`) was enabled at capture time. Whether the overlay display alone is enough, or whether that service is what turns it into a DeX session, is untested — disabling it and repeating the capture is the way to tell.
 
 It is also, so far, the least stable thing here. On that same device the phone later froze and restarted, which is the signature of a `system_server` watchdog rather than of an app crash. The likeliest cause is the two switches fighting: forcing freeform is a retry loop of `wm set-display-windowing-mode` aimed at a display that DeX is configuring at the same moment. **Freeform forcing is now skipped whenever the display was created by the system**, regardless of the other switch — on such a display it is both pointless (DeX manages its own windowing) and actively counterproductive (it drags DeX back onto the legacy freeform path this mode exists to escape). Whether that was the whole cause is unconfirmed.
 

@@ -48,9 +48,24 @@ object Diagnostics {
             appendLine("State: ${session.state.value}")
             appendLine("Display id: ${session.displayId}")
             appendLine("Video size: ${session.videoWidth}x${session.videoHeight}")
+            // "Display created by" first, because every other line below is read
+            // differently depending on it, and because a report otherwise cannot say
+            // which of the two modes produced it.
+            appendLine(
+                "Display created by: " +
+                    if (session.usingOverlayDisplay) "the system (overlay display)"
+                    else "LocalDex (virtual display)"
+            )
             appendLine(
                 "Freeform: ${
                     when {
+                        // Checked first: on a system-created display forcing is
+                        // skipped outright, and both flags below then sit at their
+                        // initial values, which the old wording reported as
+                        // "forced OK" — a plain untruth in a report whose whole job
+                        // is to be trusted over guesswork.
+                        session.usingOverlayDisplay ->
+                            "not forced — DeX manages this display's windowing itself"
                         session.freeformForceInProgress -> "still forcing"
                         session.freeformForceFailed -> "FAILED — apps open fullscreen"
                         else -> "forced OK"

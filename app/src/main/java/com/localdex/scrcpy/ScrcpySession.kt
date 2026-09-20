@@ -155,7 +155,8 @@ class ScrcpySession(
      * [forceFreeform]: see there for why forcing a windowing mode on such a display
      * is both pointless and dangerous.
      */
-    private var usingOverlayDisplay = false
+    var usingOverlayDisplay = false
+        private set
 
     fun start() {
         scope.launch {

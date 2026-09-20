@@ -9,6 +9,7 @@ object Prefs {
     private const val KEY_PANEL_POSITION = "panel_position_fraction"
     private const val KEY_FORCE_FREEFORM = "force_freeform"
     private const val KEY_OVERLAY_DISPLAY = "use_overlay_display"
+    private const val KEY_PENDING_OVERLAY_RESTORE = "pending_overlay_restore"
 
     const val DEFAULT_DISPLAY_SPEC = "1920x1440/240"
 
@@ -81,6 +82,30 @@ object Prefs {
 
     fun setUseOverlayDisplay(context: Context, enabled: Boolean) {
         prefs(context).edit().putBoolean(KEY_OVERLAY_DISPLAY, enabled).apply()
+    }
+
+    /**
+     * What `overlay_display_devices` should be put back to, written *before* this
+     * app changes it and cleared once it has been put back.
+     *
+     * A session normally restores the setting itself on stop. This exists for the
+     * case where it never gets the chance: `overlay_display_devices` is device-wide
+     * and survives the app, so a crash — the app's, or the system's — would
+     * otherwise leave a phantom display on the phone for good, recreated on every
+     * boot. A non-null value here means the last session died without cleaning up,
+     * and the next one restores it before doing anything else.
+     *
+     * Written with commit() rather than apply(): the whole point is to survive a
+     * process that is about to die, and apply() only promises the write eventually.
+     */
+    fun getPendingOverlayRestore(context: Context): String? =
+        prefs(context).getString(KEY_PENDING_OVERLAY_RESTORE, null)
+
+    fun setPendingOverlayRestore(context: Context, value: String?) {
+        val editor = prefs(context).edit()
+        if (value == null) editor.remove(KEY_PENDING_OVERLAY_RESTORE)
+        else editor.putString(KEY_PENDING_OVERLAY_RESTORE, value)
+        editor.commit()
     }
 
     fun getPanelPositionFraction(context: Context): Float =

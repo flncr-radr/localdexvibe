@@ -358,10 +358,13 @@ class MainActivity : AppCompatActivity() {
      */
     private fun updateOverlayDisplayNote(overlay: Boolean) {
         overlayDisplayNote.text = if (overlay) {
-            "On: the system creates the display and LocalDex mirrors it. This is the " +
-                "attempt at making DeX's own taskbar, minimize and show-desktop behave " +
-                "as they do on a monitor. A small preview window appears on the phone " +
-                "screen while a session runs. Takes effect next session."
+            "On: the system creates the display and LocalDex mirrors it, which does get " +
+                "DeX to engage — its taskbar lists running apps. A small preview window " +
+                "appears on the phone screen, and \"Force freeform windowing\" is ignored " +
+                "in this mode because DeX manages this display itself. Still rough: one " +
+                "device froze and restarted during a session. If a phantom display is " +
+                "left behind, Developer options > Simulate secondary displays > None " +
+                "clears it. Takes effect next session."
         } else {
             "Off: LocalDex creates the display itself — no preview window, and nothing " +
                 "device-wide is changed. DeX's own taskbar buttons stay inert."

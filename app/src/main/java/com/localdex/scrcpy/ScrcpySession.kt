@@ -150,6 +150,13 @@ class ScrcpySession(
      */
     private var originalOverlayDisplayDevices: String? = null
 
+    /**
+     * True once this session is running on a display the *system* created. It gates
+     * [forceFreeform]: see there for why forcing a windowing mode on such a display
+     * is both pointless and dangerous.
+     */
+    private var usingOverlayDisplay = false
+
     fun start() {
         scope.launch {
             try {
@@ -168,6 +175,8 @@ class ScrcpySession(
         if (!manager.autoConnect(context, 10_000)) {
             throw IOException("Could not connect to ADB. Is wireless debugging on and paired?")
         }
+
+        recoverStaleOverlayDisplay(manager)
 
         setStarting("Preparing display…")
         // Read into memory (~700 KB): AssetFileDescriptor can't report the size of a
@@ -381,8 +390,12 @@ class ScrcpySession(
      */
     private suspend fun setUpOverlayDisplay(manager: AbsAdbConnectionManager): Int? {
         try {
-            originalOverlayDisplayDevices =
+            val original =
                 Adb.runShell(manager, "settings get global overlay_display_devices").trim()
+            originalOverlayDisplayDevices = original
+            // Recorded before the write, not after: if this process or the system
+            // dies between the two, the next session still knows what to put back.
+            Prefs.setPendingOverlayRestore(context, original)
             Adb.runShell(manager, "settings put global overlay_display_devices \"$displaySpec\"")
             Log.i(
                 TAG,
@@ -405,7 +418,10 @@ class ScrcpySession(
             // Never 0: mirroring the built-in screen would put the phone's own
             // display inside the viewer, which looks enough like a working session
             // to waste a whole test round.
-            if (id != null && id != 0) return id
+            if (id != null && id != 0) {
+                usingOverlayDisplay = true
+                return id
+            }
             delay(OVERLAY_DISPLAY_RETRY_DELAY_MS)
         }
 
@@ -430,6 +446,30 @@ class ScrcpySession(
     private fun forceFreeform(id: Int) {
         scope.launch {
             try {
+                // Never on a system-created display, whatever the switch says.
+                //
+                // Forcing is a retry loop of `wm set-display-windowing-mode` against
+                // a display that, in this mode, DeX is configuring at the same
+                // moment — two things writing the same display's windowing mode
+                // while the window manager holds its lock. On a device where DeX
+                // really did engage this way, the phone froze and then restarted,
+                // which is the signature of a system_server watchdog rather than of
+                // anything this app can catch.
+                //
+                // It is also pointless here. Forcing exists for the case where DeX
+                // never engages and apps would otherwise open fullscreen with no
+                // window controls; a display where DeX *has* engaged manages its own
+                // windowing, and forcing only drags it back onto the legacy freeform
+                // path where minimize and show-desktop cannot work — the thing this
+                // mode is trying to escape.
+                if (usingOverlayDisplay) {
+                    Log.i(
+                        TAG,
+                        "Display $id was created by the system and DeX manages it; " +
+                            "not forcing its windowing mode"
+                    )
+                    return@launch
+                }
                 if (!Prefs.getForceFreeform(context)) {
                     Log.i(
                         TAG,
@@ -525,15 +565,46 @@ class ScrcpySession(
     private suspend fun restoreOverlayDisplayDevices() {
         val original = originalOverlayDisplayDevices ?: return
         val mgr = manager ?: return
-        try {
-            if (original == "null") {
-                Adb.runShell(mgr, "settings delete global overlay_display_devices")
-            } else {
-                Adb.runShell(mgr, "settings put global overlay_display_devices \"$original\"")
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "Could not restore overlay_display_devices to '$original'", e)
+        if (writeOverlayDisplayDevices(mgr, original)) {
+            originalOverlayDisplayDevices = null
+            Prefs.setPendingOverlayRestore(context, null)
         }
+    }
+
+    /**
+     * Undoes an overlay display left behind by a session that never got to stop
+     * cleanly — the app was killed, or the system restarted under it. Runs before
+     * anything else in a session, whichever display mode this one is going to use,
+     * because the leftover is device-wide and comes back on every boot until
+     * something clears it.
+     */
+    private suspend fun recoverStaleOverlayDisplay(manager: AbsAdbConnectionManager) {
+        val pending = Prefs.getPendingOverlayRestore(context) ?: return
+        Log.w(TAG, "Last session left overlay_display_devices set; restoring it to '$pending'")
+        if (writeOverlayDisplayDevices(manager, pending)) {
+            Prefs.setPendingOverlayRestore(context, null)
+        }
+    }
+
+    /**
+     * Writes [value] to `overlay_display_devices`, where the literal string "null" —
+     * what `settings get` prints for an unset key — means delete rather than write
+     * the word. Returns whether it went through, so a caller only forgets the value
+     * it was holding once it is actually applied.
+     */
+    private suspend fun writeOverlayDisplayDevices(
+        manager: AbsAdbConnectionManager,
+        value: String,
+    ): Boolean = try {
+        if (value == "null" || value.isEmpty()) {
+            Adb.runShell(manager, "settings delete global overlay_display_devices")
+        } else {
+            Adb.runShell(manager, "settings put global overlay_display_devices \"$value\"")
+        }
+        true
+    } catch (e: Exception) {
+        Log.w(TAG, "Could not restore overlay_display_devices to '$value'", e)
+        false
     }
 
     private fun serverLogTail(): String = synchronized(serverLog) {

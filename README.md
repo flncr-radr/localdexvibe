@@ -91,6 +91,12 @@ And in the working capture, app windows sat inside a root task named **`Desk`** 
 
 Four captures from one device agree on this. It matters because an always-on-top task cannot be reordered to the bottom — `TaskDisplayArea.positionChildTaskAt` discards the move and logs *"Ignoring move of always-on-top root task … to bottom"* — and minimize is exactly that reorder. So **with the selector open, minimize and show-desktop genuinely cannot work**, and any capture taken in that state says more about the selector than about the thing being tested. An earlier version of this section drew a general conclusion from one such capture and got it wrong.
 
+Setting `dex_on_external_display=1` turned out not to be enough on its own: the flag takes, and app windows on our display are still bare root tasks with no `Desk` parent. That container is attached with `WindowContainerTransaction.setLaunchRoot()`, which only the system shell can call, so LocalDex cannot create one — which leaves the *display itself* as the thing to change.
+
+**Use a system display (experimental)** on the main screen does that. Off, scrcpy creates a `VirtualDisplay` this app owns (`new_display=`). On, LocalDex writes the global `overlay_display_devices` setting, waits for the system to create that display through its own `OverlayDisplayAdapter`, and has scrcpy mirror it by id (`display_id=`). The difference is who owns the display: an overlay display is presented to the framework as an ordinary secondary display rather than as an app's virtual one, and "the device never considered this display eligible for DeX" is the best remaining explanation for a display where every plain-framework behaviour works and every DeX-specific one does not.
+
+It is off by default and it costs something either way: an overlay display puts a small preview window on the phone's own screen, and it writes a device-wide setting, restored on stop. If the setting can't be written or the display never appears, the session falls back to the virtual display it has always used. Whether it actually gets DeX to engage is untested.
+
 **Force freeform windowing** on the main screen stops LocalDex forcing the display's windowing mode, so DeX decides for itself. Forcing it is checked *before* every desktop-mode heuristic (`DisplayWindowSettings.getWindowingModeLocked`), so it may be taking DeX down the legacy freeform path rather than real desktop windowing — untested either way. It defaults to on, because without it apps may open fullscreen with no window controls at all.
 
 ## How it works

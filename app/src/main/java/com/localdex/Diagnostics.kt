@@ -107,6 +107,21 @@ object Diagnostics {
                     .trim()
                 appendLine("[$label] ${out.ifEmpty { "(nothing matched)" }}")
             }
+            // What Samsung's own DeX service exposes. Setting dex_on_external_display=1
+            // was not enough on its own: the flag took, and app windows still landed
+            // as bare root tasks rather than inside the "Desk" container a working
+            // DeX puts them in. That container is attached via
+            // WindowContainerTransaction.setLaunchRoot, which only the system shell
+            // can issue — so LocalDex cannot create one, and the only route left is
+            // getting Samsung's DeX service to create it. This lists what of that
+            // service is startable.
+            val dexComponents = Adb.runShellCommand(
+                context,
+                "dumpsys package com.sec.android.app.launcher | " +
+                    "grep -iE 'dexservice|desktopmode' | sort -u | head -40"
+            ).getOrElse { "(failed: ${it.message})" }.trim()
+            appendLine("[dex service components] ${dexComponents.ifEmpty { "(nothing matched)" }}")
+
             val services = Adb.runShellCommand(context, "service list | grep -iE 'dex|desktop'")
                 .getOrElse { "(failed: ${it.message})" }
                 .trim()

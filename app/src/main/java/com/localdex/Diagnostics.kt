@@ -122,6 +122,24 @@ object Diagnostics {
             ).getOrElse { "(failed: ${it.message})" }.trim()
             appendLine("[dex service components] ${dexComponents.ifEmpty { "(nothing matched)" }}")
 
+            // How the virtual display itself is described. This is the other half of
+            // the A/B: everything plain-framework works on our display and everything
+            // needing DeX's own session state does not, so Samsung may simply not
+            // consider this display eligible for DeX. Its flags, type and owner are
+            // what such a check would read, and scrcpy picks those when it creates
+            // the display — unlike the Desk container, they are ours to change.
+            // Captured for every display so a working DeX's display and ours can be
+            // compared line for line in one report.
+            val displays = Adb.runShellCommand(
+                context,
+                "dumpsys display | grep -iE 'mDisplayId=|uniqueId=|DisplayDeviceInfo|" +
+                    "ownerPackageName|flags=|mBaseDisplayInfo' | head -60"
+            ).getOrElse { "(failed: ${it.message})" }.trim()
+            appendLine()
+            appendLine("[displays]")
+            appendLine(displays.ifEmpty { "(nothing matched)" })
+            appendLine()
+
             val services = Adb.runShellCommand(context, "service list | grep -iE 'dex|desktop'")
                 .getOrElse { "(failed: ${it.message})" }
                 .trim()

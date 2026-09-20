@@ -107,6 +107,30 @@ object WindowSnap {
      * focus hint and the task list are re-read on the retry, since a window that
      * is mid-transition can be missing from either.
      */
+    /**
+     * Every app window on [displayId], hidden ones included — a taskbar's worth of
+     * state, which DeX's own taskbar does not offer for a minimized window.
+     */
+    internal suspend fun listWindows(
+        manager: AbsAdbConnectionManager,
+        displayId: Int,
+    ): List<WindowSnapParser.TaskWindow> =
+        WindowSnapParser.parseTasks(Adb.runShell(manager, "am stack list"), displayId)
+
+    /**
+     * Brings [task] back to the front of [displayId], freeform so it returns as a
+     * window rather than filling the display. This is the same `am start --task`
+     * call the snapping uses, which minimizing does not invalidate: a minimized
+     * task keeps its bounds, so it comes back where it was.
+     */
+    internal suspend fun focusWindow(
+        manager: AbsAdbConnectionManager,
+        task: WindowSnapParser.TaskWindow,
+        displayId: Int,
+    ) {
+        setWindowingMode(manager, task, displayId, WINDOWING_MODE_FREEFORM)
+    }
+
     private suspend fun findTask(
         manager: AbsAdbConnectionManager,
         displayId: Int,

@@ -80,9 +80,28 @@ internal object WindowSnapParser {
         displayId: Int,
         focusedPackage: String?,
     ): TaskWindow? {
+        val candidates = parseTasks(amStackList, displayId)
+        if (focusedPackage != null) {
+            candidates.firstOrNull { it.component.substringBefore('/') == focusedPackage }
+                ?.let { return it }
+        }
+        return candidates.singleOrNull { it.visible } ?: candidates.singleOrNull()
+    }
+
+    /**
+     * Every app window on [displayId], in the order the device listed them,
+     * hidden ones included.
+     *
+     * A minimized window stays here with `visible=false` and its bounds intact —
+     * confirmed on a device, where minimizing Chrome left its task listed as
+     * `taskId=1024: com.android.chrome/... bounds=[288,216][1632,1224]
+     * visible=false`. Nothing in DeX offers a way back to it, which is what this
+     * list is for.
+     */
+    fun parseTasks(amStackList: String, displayId: Int): List<TaskWindow> {
         var currentDisplay: Int? = null
         var currentActivityType: String? = null
-        val candidates = mutableListOf<TaskWindow>()
+        val tasks = mutableListOf<TaskWindow>()
         for (line in amStackList.lineSequence()) {
             val header = ROOT_TASK_HEADER.find(line)
             if (header != null) {
@@ -99,15 +118,10 @@ internal object WindowSnapParser {
             if (currentActivityType != null && currentActivityType != ACTIVITY_TYPE_STANDARD) continue
             val match = CHILD_TASK_LINE.find(line) ?: continue
             val taskId = match.groupValues[1].toIntOrNull() ?: continue
-            val component = match.groupValues[2]
             val visible = VISIBLE_FLAG.find(line)?.groupValues?.get(1) == "true"
-            val task = TaskWindow(taskId, component, parseBounds(match.groupValues), visible)
-            if (focusedPackage != null && component.substringBefore('/') == focusedPackage) {
-                return task
-            }
-            candidates += task
+            tasks += TaskWindow(taskId, match.groupValues[2], parseBounds(match.groupValues), visible)
         }
-        return candidates.singleOrNull { it.visible } ?: candidates.singleOrNull()
+        return tasks
     }
 
     /**

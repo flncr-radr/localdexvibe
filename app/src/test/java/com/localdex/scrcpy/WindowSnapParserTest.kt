@@ -99,6 +99,53 @@ class WindowSnapParserTest {
         assertEquals(1012, task?.taskId)
     }
 
+    /**
+     * Verbatim from the device right after minimizing Chrome and nothing else
+     * (display 25). This is the state the Windows list exists to rescue: the
+     * window is gone from the screen but its task is still listed, with its
+     * bounds unchanged.
+     */
+    private val minimizedStackList = """
+        RootTask id=1022 bounds=[0,0][1920,1440] displayId=25 userId=0
+         configuration={0.8 ldltr 240dpi xlrg land winConfig={ mBounds=Rect(0, 0 - 1920, 1440) mWindowingMode=fullscreen mActivityType=home mAlwaysOnTop=undefined} s.8324}
+          taskId=1023: com.sec.android.app.launcher/com.honeyspace.dexservice.SecondaryLauncher bounds=[0,0][1920,1440] userId=0 visible=true topActivity=ComponentInfo{com.sec.android.app.launcher/com.honeyspace.dexservice.SecondaryLauncher}
+        RootTask id=1024 bounds=[288,216][1632,1224] displayId=25 userId=0
+         configuration={0.8 ldltr 240dpi lrg land winConfig={ mBounds=Rect(288, 216 - 1632, 1224) mWindowingMode=freeform mActivityType=standard mAlwaysOnTop=off} s.8324}
+          taskId=1024: com.android.chrome/com.google.android.apps.chrome.Main bounds=[288,216][1632,1224] userId=0 visible=false
+    """.trimIndent()
+
+    @Test
+    fun `parseTasks keeps a minimized window, with its bounds`() {
+        val tasks = WindowSnapParser.parseTasks(minimizedStackList, 25)
+        assertEquals(1, tasks.size)
+        val chrome = tasks.single()
+        assertEquals(1024, chrome.taskId)
+        assertFalse(chrome.visible)
+        // Bounds survive minimizing, so restoring does not have to invent a size.
+        assertEquals(WindowSnapParser.Bounds(288, 216, 1632, 1224), chrome.bounds)
+    }
+
+    @Test
+    fun `parseTasks leaves out home and recents`() {
+        val tasks = WindowSnapParser.parseTasks(dexDisplayStackList, 23)
+        assertEquals(listOf(1012), tasks.map { it.taskId })
+    }
+
+    @Test
+    fun `parseTasks returns every app window in listed order`() {
+        val twoApps = dexDisplayStackList + "\n" + """
+            RootTask id=1030 bounds=[0,0][960,720] displayId=23 userId=0
+             configuration={winConfig={ mWindowingMode=freeform mActivityType=standard}}
+              taskId=1030: com.example.other/.Main bounds=[0,0][960,720] userId=0 visible=true
+        """.trimIndent()
+        assertEquals(listOf(1012, 1030), WindowSnapParser.parseTasks(twoApps, 23).map { it.taskId })
+    }
+
+    @Test
+    fun `parseTasks returns nothing for a display with only home on it`() {
+        assertEquals(emptyList<Int>(), WindowSnapParser.parseTasks(minimizedStackList, 99).map { it.taskId })
+    }
+
     // -- displaySection ------------------------------------------------------------
 
     @Test

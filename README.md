@@ -33,6 +33,7 @@ Pairing is one-time. After the first successful connection LocalDex grants itsel
 - A small handle peeks from the right edge — **tap it** to reveal the window controls (**◀ Left**, **Right ▶**, **Window / Full**), the DeX taskbar stand-ins (**◁ Back**, **○ Desktop**, **DeX Shortcuts**) and **Stop** (with confirmation), tap again to hide them. The handle is excluded from the system's edge-swipe gesture so a swipe near it doesn't steal the tap. Its vertical position (default 1/3 up from the bottom) is adjustable on the main screen under **Exit tab position**.
 - **Show Stats** in the side tab overlays live fps, resolution, and how long the overlay's been open, top-left — a quick way to tell whether something feels slow because it *is* slow.
 - Leave the viewer with Home; the session keeps running. Return (or stop) via the **LocalDex notification** — the notification's *Stop* action always ends the session, even if the viewer is gone. A **Quick Settings tile** ("LocalDex") does the same start/stop in one tap without opening the app, assuming you've paired at least once already.
+- **Windows** in the side tab lists every app window on the DeX display, minimized ones included, and brings back whichever you tap — DeX itself offers no way back to a minimized window (see below).
 - **Copy Diagnostics**, on the main screen and in the side tab, puts a text report (app/device info, connection and session state, this app's own recent log lines) on the clipboard — paste it into a bug report instead of a screenshot and a description.
 
 ## Viewing DeX from a computer
@@ -69,7 +70,7 @@ There is deliberately **no button for DeX's ≡** (the window overview / multipl
 Some of DeX's own window management doesn't work here, and these are Samsung's UI rather than anything LocalDex injects — an earlier version of this section wrongly blamed the taskbar for ignoring our clicks, when in fact tapping its ≡ *does* open the desktop selector:
 
 - The **desktop selector** (≡) opens, but with an empty body and inert controls: `+ Desktop` does nothing and it won't dismiss by clicking.
-- **Minimize** in a window's caption does nothing, while maximize and close work.
+- **Minimize** in a window's caption hides the window with no way back to it. The task survives — on a device it stayed listed as `taskId=1024: com.android.chrome/… bounds=[288,216][1632,1224] visible=false`, bounds and all — but nothing in DeX's taskbar lists it, so the window is simply gone. The side tab's **Windows** button is the way back.
 
 Both come from the same cause, and it is LocalDex's own doing rather than Samsung's. Forcing the display's windowing mode is checked *before* every desktop-mode heuristic (`DisplayWindowSettings.getWindowingModeLocked`), so it takes DeX down the **legacy freeform** path instead of real desktop windowing. On that path the shell marks each window always-on-top — visible in `dumpsys` as `mAlwaysOnTop=on` on every freeform root task, against `undefined` on the home task — and always-on-top tasks cannot be reordered to the bottom:
 

@@ -358,6 +358,20 @@ class ScrcpySession(
         return WindowSnap.snap(mgr, displayId, videoWidth, videoHeight, direction)
     }
 
+    /** Every app window on this session's display, hidden ones included. */
+    internal suspend fun listWindows(): List<WindowSnapParser.TaskWindow> {
+        val mgr = manager ?: return emptyList()
+        if (displayId == -1) return emptyList()
+        return WindowSnap.listWindows(mgr, displayId)
+    }
+
+    /** Brings [task] back to the front of this session's display. */
+    internal suspend fun focusWindow(task: WindowSnapParser.TaskWindow) {
+        val mgr = manager ?: return
+        if (displayId == -1) return
+        WindowSnap.focusWindow(mgr, task, displayId)
+    }
+
     /** Puts `enable_freeform_support` back to what it was before this session touched it. */
     private suspend fun restoreFreeformSetting() {
         val original = originalFreeformSetting ?: return

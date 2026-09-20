@@ -228,6 +228,27 @@
                 android:text="Show Stats" />
 
             <!--
+                DeX has no way back to a minimized window: its task survives with
+                visible=false and its bounds intact, but nothing on the taskbar
+                lists it. This is that missing taskbar.
+            -->
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/viewerWindowsButton"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:layout_marginTop="8dp"
+                android:paddingHorizontal="20dp"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                app:cornerRadius="12dp"
+                app:strokeColor="@color/outline"
+                android:textAllCaps="false"
+                android:textSize="14sp"
+                android:textColor="@color/on_surface"
+                android:text="Windows" />
+
+            <!--
                 Here as well as on the main screen: capturing a report meant leaving
                 the viewer first (swipe up for the nav bar, Home, reopen the app),
                 and the session state is exactly what the report is for.

@@ -76,6 +76,7 @@ class ViewerActivity : AppCompatActivity() {
     private lateinit var viewerBackButton: Button
     private lateinit var viewerHomeButton: Button
     private lateinit var viewerShortcutsButton: Button
+    private lateinit var viewerWindowsButton: Button
     private lateinit var viewerStatsButton: Button
     private lateinit var viewerDiagnosticsButton: Button
     private lateinit var viewerStopButton: Button
@@ -131,6 +132,7 @@ class ViewerActivity : AppCompatActivity() {
         viewerBackButton = findViewById(R.id.viewerBackButton)
         viewerHomeButton = findViewById(R.id.viewerHomeButton)
         viewerShortcutsButton = findViewById(R.id.viewerShortcutsButton)
+        viewerWindowsButton = findViewById(R.id.viewerWindowsButton)
         viewerStatsButton = findViewById(R.id.viewerStatsButton)
         viewerDiagnosticsButton = findViewById(R.id.viewerDiagnosticsButton)
         viewerStopButton = findViewById(R.id.viewerStopButton)
@@ -149,6 +151,7 @@ class ViewerActivity : AppCompatActivity() {
         viewerShortcutsButton.setOnClickListener {
             session?.controller?.sendMetaKeyPress(KeyEvent.KEYCODE_SLASH)
         }
+        viewerWindowsButton.setOnClickListener { showWindows() }
         viewerStatsButton.setOnClickListener { toggleStats() }
         viewerDiagnosticsButton.setOnClickListener { copyDiagnostics() }
         viewerStopButton.setOnClickListener { confirmStop() }
@@ -362,6 +365,55 @@ class ViewerActivity : AppCompatActivity() {
      */
     private fun sendKeyToDex(keycode: Int) {
         session?.controller?.sendKeyPress(keycode)
+    }
+
+    /**
+     * The taskbar DeX doesn't give us. Minimizing a window on the DeX display
+     * hides it with no way back: the task stays alive with `visible=false` and its
+     * bounds intact, but nothing in DeX's own taskbar lists it, so the window is
+     * simply gone as far as the user is concerned. This lists every app window on
+     * the display, hidden ones included, and brings back whichever is tapped.
+     */
+    private fun showWindows() {
+        viewerWindowsButton.isEnabled = false
+        lifecycleScope.launch {
+            val activeSession = session
+            val windows = if (activeSession == null) emptyList()
+            else withContext(Dispatchers.IO) { activeSession.listWindows() }
+            viewerWindowsButton.isEnabled = true
+
+            if (windows.isEmpty()) {
+                Toast.makeText(this@ViewerActivity, "No app windows open", Toast.LENGTH_SHORT).show()
+                return@launch
+            }
+            val labels = windows.map { window ->
+                val name = appLabel(window.component.substringBefore('/'))
+                if (window.visible) name else "$name  (minimized)"
+            }.toTypedArray()
+
+            AlertDialog.Builder(this@ViewerActivity)
+                .setTitle("Windows on DeX")
+                .setItems(labels) { _, index ->
+                    lifecycleScope.launch {
+                        withContext(Dispatchers.IO) { activeSession?.focusWindow(windows[index]) }
+                    }
+                }
+                .setNegativeButton("Close", null)
+                .show()
+        }
+    }
+
+    /**
+     * The app's own name for a package, falling back to the package name — these
+     * are apps installed on this very device, so the label is available locally
+     * and there is no reason to show "com.android.chrome" to anyone.
+     */
+    private fun appLabel(packageName: String): String = try {
+        packageManager.getApplicationLabel(
+            packageManager.getApplicationInfo(packageName, 0)
+        ).toString()
+    } catch (e: Exception) {
+        packageName
     }
 
     /**

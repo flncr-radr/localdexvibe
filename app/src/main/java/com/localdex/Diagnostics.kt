@@ -102,9 +102,19 @@ object Diagnostics {
         )
         return buildString {
             for ((label, command) in probes) {
-                val out = Adb.runShellCommand(context, "$command | grep -iE 'dex|desktop'")
-                    .getOrElse { "(failed: ${it.message})" }
-                    .trim()
+                // 'overlay' and 'display' as well as the obvious two: the first cut
+                // of this matched only 'dex|desktop', which cannot match
+                // overlay_display_devices — the global setting that makes the system
+                // create an OverlayDisplayAdapter display. That matters because an
+                // overlay display is presented to the system as a secondary display
+                // in a way a plain VirtualDisplay is not, and this session picked
+                // VirtualDisplay deliberately (see ScrcpySession's header comment).
+                // If the working app sets it and we do not, the earlier captures
+                // could not have shown it.
+                val out = Adb.runShellCommand(
+                    context,
+                    "$command | grep -iE 'dex|desktop|overlay|display' | head -30"
+                ).getOrElse { "(failed: ${it.message})" }.trim()
                 appendLine("[$label] ${out.ifEmpty { "(nothing matched)" }}")
             }
             // What Samsung's own DeX service exposes. Setting dex_on_external_display=1

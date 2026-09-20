@@ -58,6 +58,12 @@ object Diagnostics {
                 }"
             )
 
+            appendLine(
+                "dex_on_external_display: " +
+                    Adb.runShellCommand(context, "settings get system dex_on_external_display")
+                        .getOrElse { "(failed: ${it.message})" }.trim()
+            )
+
             appendLine()
             appendLine("-- Tasks on display ${session.displayId} --")
             appendLine(displayTasks(context, session.displayId))

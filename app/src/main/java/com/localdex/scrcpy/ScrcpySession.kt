@@ -130,6 +130,12 @@ class ScrcpySession(
      */
     private var originalFreeformSetting: String? = null
 
+    /**
+     * `dex_on_external_display`'s value before this session set it, so [stop] can
+     * put it back rather than leaving the phone believing a DeX display exists.
+     */
+    private var originalDexOnExternalDisplay: String? = null
+
     fun start() {
         scope.launch {
             try {
@@ -170,6 +176,36 @@ class ScrcpySession(
             }
         } else {
             Log.i(TAG, "Freeform forcing off; leaving enable_freeform_support alone")
+        }
+
+        // Two captures from the reporting device, one with another on-device DeX app
+        // running and one with this one, differed in exactly this setting:
+        //
+        //     app whose DeX works fully   dex_on_external_display=1
+        //     this app                    dex_on_external_display=0
+        //
+        // In the working capture, app windows on the DeX display sat inside a root
+        // task named "Desk" (visible as `mLaunchRootTask=... Task{#1051 name=Desk}`),
+        // where ours are bare root tasks with no such parent. That container is the
+        // likeliest thing DeX's taskbar enumerates, which would explain why its
+        // taskbar never lists our running apps, its circle minimizes nothing, and
+        // its desktop selector opens empty — all of DeX's own session-level UI,
+        // while everything plain-framework works.
+        //
+        // Set before the display is created, since the system has to see it when the
+        // display appears. Whether writing it actually enters DeX mode, or whether
+        // it is only a flag the system sets once DeX is already up, is exactly what
+        // this is here to find out — it is cheap to try and restored on stop.
+        try {
+            originalDexOnExternalDisplay =
+                Adb.runShell(manager, "settings get system dex_on_external_display").trim()
+            Adb.runShell(manager, "settings put system dex_on_external_display 1")
+            Log.i(
+                TAG,
+                "dex_on_external_display: was '$originalDexOnExternalDisplay', set to 1"
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not set dex_on_external_display", e)
         }
 
         val scid = Random.nextInt(1, Int.MAX_VALUE)
@@ -387,6 +423,21 @@ class ScrcpySession(
         }
     }
 
+    /** Puts `dex_on_external_display` back to what it was before this session. */
+    private suspend fun restoreDexOnExternalDisplay() {
+        val original = originalDexOnExternalDisplay ?: return
+        val mgr = manager ?: return
+        try {
+            if (original == "null") {
+                Adb.runShell(mgr, "settings delete system dex_on_external_display")
+            } else {
+                Adb.runShell(mgr, "settings put system dex_on_external_display $original")
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not restore dex_on_external_display to '$original'", e)
+        }
+    }
+
     private fun serverLogTail(): String = synchronized(serverLog) {
         serverLog.toString().trim().takeLast(500).ifEmpty { "(no output)" }
     }
@@ -410,6 +461,7 @@ class ScrcpySession(
             videoDecoder?.stop()
             controller?.stop()
             restoreFreeformSetting()
+            restoreDexOnExternalDisplay()
 
             listOf(videoStream, controlStream, shellStream).forEach { stream ->
                 try {

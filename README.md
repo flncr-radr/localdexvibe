@@ -74,6 +74,14 @@ Some of DeX's own window management doesn't work here, and these are Samsung's U
 
 What works, from a device: **Back** on the taskbar, window snapping, minimize (in the sense of hiding), and restoring through the **Windows** list. What doesn't: the taskbar's **○** and **≡**, and dismissing the selector once it is up.
 
+Everything in that second list is DeX's *own* session-level UI, and everything in the first is plain Android framework. Two captures from one phone — one with another on-device DeX app running, one with LocalDex — differ in a single setting:
+
+| | app whose DeX works fully | LocalDex |
+| --- | --- | --- |
+| `settings get system dex_on_external_display` | `1` | `0` |
+
+And in the working capture, app windows sat inside a root task named **`Desk`** (`mLaunchRootTask=… Task{#1051 name=Desk}`), where LocalDex's are bare root tasks with no such parent. That container is the likeliest thing the taskbar enumerates, which would explain why ours lists nothing. LocalDex now sets `dex_on_external_display=1` for the duration of a session and restores it on stop. Whether writing it actually enters DeX mode, or whether it is only a flag the system sets once DeX is already up, is still open.
+
 `mAlwaysOnTop` on freeform tasks is worth knowing about before reading any `dumpsys` from this app, because it tracks the selector rather than the windowing mode:
 
 | Desktop selector | Freeform tasks | Home task |

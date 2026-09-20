@@ -47,6 +47,13 @@ class ScrcpySession(
         private const val FREEFORM_FORCE_ATTEMPTS = 5
         private const val FREEFORM_FORCE_RETRY_DELAY_MS = 300L
 
+        /**
+         * The system creates an overlay display a moment after the setting is
+         * written, not synchronously, so its id has to be polled for.
+         */
+        private const val OVERLAY_DISPLAY_ATTEMPTS = 20
+        private const val OVERLAY_DISPLAY_RETRY_DELAY_MS = 250L
+
         /** Guards read-check-then-write access to [current] from [startIfNeeded] and [stop]. */
         private val lock = Any()
 
@@ -136,6 +143,13 @@ class ScrcpySession(
      */
     private var originalDexOnExternalDisplay: String? = null
 
+    /**
+     * `overlay_display_devices`' value before this session set it, so [stop] can put
+     * it back. Left null when the session did not use an overlay display, so there
+     * is nothing to restore — this is a global setting that survives the app.
+     */
+    private var originalOverlayDisplayDevices: String? = null
+
     fun start() {
         scope.launch {
             try {
@@ -208,13 +222,26 @@ class ScrcpySession(
             Log.w(TAG, "Could not set dex_on_external_display", e)
         }
 
+        // Either have scrcpy create the display, or have the system create it and
+        // mirror it by id. See Prefs.getUseOverlayDisplay for why the second exists.
+        val overlayDisplayId =
+            if (Prefs.getUseOverlayDisplay(context)) setUpOverlayDisplay(manager) else null
+
         val scid = Random.nextInt(1, Int.MAX_VALUE)
         val scidHex = String.format("%08x", scid)
+        val displayArg =
+            if (overlayDisplayId != null) "display_id=$overlayDisplayId"
+            else "new_display=$displaySpec"
         val command = "CLASSPATH=$SERVER_REMOTE_PATH app_process / com.genymobile.scrcpy.Server " +
             "$SERVER_VERSION scid=$scidHex log_level=info " +
             "video=true audio=false control=true video_codec=h264 " +
             "tunnel_forward=true send_device_meta=false send_dummy_byte=false " +
-            "new_display=$displaySpec"
+            displayArg
+
+        // With new_display the id only turns up in the server's log, so it is parsed
+        // out of there; mirroring an overlay display, it is already known, and
+        // nothing in the log will ever announce it.
+        if (overlayDisplayId != null) useDisplayId(overlayDisplayId)
 
         val shell = manager.openStream("shell:$command")
         shellStream = shell
@@ -321,8 +348,18 @@ class ScrcpySession(
     private fun parseDisplayId(log: String) {
         if (displayId != -1) return
         val id = ScrcpyProtocol.parseDisplayId(log) ?: return
+        useDisplayId(id)
+    }
+
+    /**
+     * Adopts [id] as this session's display. Reached two ways: parsed out of the
+     * server's log when scrcpy created the display, or known up front when the
+     * system created it and we are only mirroring it. First call wins.
+     */
+    private fun useDisplayId(id: Int) {
+        if (displayId != -1) return
         displayId = id
-        Log.i(TAG, "Virtual display id: $id")
+        Log.i(TAG, "DeX display id: $id")
         forceFreeform(id)
 
         // If video is already running, re-emit so observers pick up the id.
@@ -330,6 +367,52 @@ class ScrcpySession(
         if (current is State.Running) {
             _state.value = current.copy(displayId = id)
         }
+    }
+
+    /**
+     * Has the *system* create the display, by writing `overlay_display_devices`, and
+     * returns its logical display id for scrcpy to mirror. Returns null if the
+     * setting could not be written or the display never appeared, in which case the
+     * caller falls back to scrcpy creating a VirtualDisplay as before — a failed
+     * experiment should cost a worse DeX, not a dead session.
+     *
+     * The display spec is already in the `WIDTHxHEIGHT/DENSITY` form this setting
+     * wants, so it is passed through unchanged.
+     */
+    private suspend fun setUpOverlayDisplay(manager: AbsAdbConnectionManager): Int? {
+        try {
+            originalOverlayDisplayDevices =
+                Adb.runShell(manager, "settings get global overlay_display_devices").trim()
+            Adb.runShell(manager, "settings put global overlay_display_devices \"$displaySpec\"")
+            Log.i(
+                TAG,
+                "overlay_display_devices: was '$originalOverlayDisplayDevices', " +
+                    "set to '$displaySpec'"
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not set overlay_display_devices", e)
+            originalOverlayDisplayDevices = null
+            return null
+        }
+
+        setStarting("Waiting for the overlay display…")
+        repeat(OVERLAY_DISPLAY_ATTEMPTS) {
+            val id = try {
+                WindowSnapParser.parseOverlayDisplayId(Adb.runShell(manager, "dumpsys display"))
+            } catch (e: Exception) {
+                null
+            }
+            // Never 0: mirroring the built-in screen would put the phone's own
+            // display inside the viewer, which looks enough like a working session
+            // to waste a whole test round.
+            if (id != null && id != 0) return id
+            delay(OVERLAY_DISPLAY_RETRY_DELAY_MS)
+        }
+
+        Log.w(TAG, "Overlay display never appeared; falling back to a virtual display")
+        restoreOverlayDisplayDevices()
+        originalOverlayDisplayDevices = null
+        return null
     }
 
     /**
@@ -438,6 +521,21 @@ class ScrcpySession(
         }
     }
 
+    /** Puts `overlay_display_devices` back, removing any display this session added. */
+    private suspend fun restoreOverlayDisplayDevices() {
+        val original = originalOverlayDisplayDevices ?: return
+        val mgr = manager ?: return
+        try {
+            if (original == "null") {
+                Adb.runShell(mgr, "settings delete global overlay_display_devices")
+            } else {
+                Adb.runShell(mgr, "settings put global overlay_display_devices \"$original\"")
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not restore overlay_display_devices to '$original'", e)
+        }
+    }
+
     private fun serverLogTail(): String = synchronized(serverLog) {
         serverLog.toString().trim().takeLast(500).ifEmpty { "(no output)" }
     }
@@ -462,6 +560,7 @@ class ScrcpySession(
             controller?.stop()
             restoreFreeformSetting()
             restoreDexOnExternalDisplay()
+            restoreOverlayDisplayDevices()
 
             listOf(videoStream, controlStream, shellStream).forEach { stream ->
                 try {

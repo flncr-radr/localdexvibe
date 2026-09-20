@@ -8,6 +8,7 @@ object Prefs {
     private const val KEY_DISPLAY_SPEC = "display_spec"
     private const val KEY_PANEL_POSITION = "panel_position_fraction"
     private const val KEY_FORCE_FREEFORM = "force_freeform"
+    private const val KEY_OVERLAY_DISPLAY = "use_overlay_display"
 
     const val DEFAULT_DISPLAY_SPEC = "1920x1440/240"
 
@@ -50,6 +51,36 @@ object Prefs {
 
     fun setForceFreeform(context: Context, enabled: Boolean) {
         prefs(context).edit().putBoolean(KEY_FORCE_FREEFORM, enabled).apply()
+    }
+
+    /**
+     * Whether to run DeX on a display created by the global `overlay_display_devices`
+     * setting, mirrored by id, instead of on a VirtualDisplay this app creates.
+     *
+     * The difference is who makes the display. `new_display` has scrcpy create a
+     * VirtualDisplay we own; `overlay_display_devices` has the system create one
+     * through its own OverlayDisplayAdapter, which presents it to the rest of the
+     * framework as an ordinary secondary display rather than as an app's virtual one.
+     *
+     * That distinction is the best remaining explanation for what this project has
+     * been stuck on: on our display every plain-framework behaviour works and every
+     * behaviour that needs DeX's own session state does not — its taskbar never
+     * lists running apps, its circle minimizes nothing, its desktop selector opens
+     * empty — which is the shape of a device that never considered this display
+     * eligible for DeX in the first place. Setting dex_on_external_display=1 was not
+     * enough on its own, and the container a working DeX parents its windows under
+     * is attached with an API only the system shell can call, so making the display
+     * itself look right is the lever we still have.
+     *
+     * Defaults to false: it is an experiment, it writes a global setting, and an
+     * overlay display puts a preview window on the phone's own screen, which a
+     * VirtualDisplay does not.
+     */
+    fun getUseOverlayDisplay(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_OVERLAY_DISPLAY, false)
+
+    fun setUseOverlayDisplay(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean(KEY_OVERLAY_DISPLAY, enabled).apply()
     }
 
     fun getPanelPositionFraction(context: Context): Float =

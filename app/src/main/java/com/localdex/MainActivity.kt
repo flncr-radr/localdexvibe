@@ -36,6 +36,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var panelPositionGroup: MaterialButtonToggleGroup
     private lateinit var forceFreeformSwitch: SwitchMaterial
     private lateinit var forceFreeformNote: TextView
+    private lateinit var overlayDisplaySwitch: SwitchMaterial
+    private lateinit var overlayDisplayNote: TextView
     private lateinit var startButton: Button
     private lateinit var viewerButton: Button
     private lateinit var stopButton: Button
@@ -62,6 +64,8 @@ class MainActivity : AppCompatActivity() {
         panelPositionGroup = findViewById(R.id.panelPositionGroup)
         forceFreeformSwitch = findViewById(R.id.forceFreeformSwitch)
         forceFreeformNote = findViewById(R.id.forceFreeformNote)
+        overlayDisplaySwitch = findViewById(R.id.overlayDisplaySwitch)
+        overlayDisplayNote = findViewById(R.id.overlayDisplayNote)
         startButton = findViewById(R.id.startButton)
         viewerButton = findViewById(R.id.viewerButton)
         stopButton = findViewById(R.id.stopButton)
@@ -96,6 +100,13 @@ class MainActivity : AppCompatActivity() {
         forceFreeformSwitch.setOnCheckedChangeListener { _, checked ->
             Prefs.setForceFreeform(this, checked)
             updateForceFreeformNote(checked)
+        }
+
+        overlayDisplaySwitch.isChecked = Prefs.getUseOverlayDisplay(this)
+        updateOverlayDisplayNote(overlayDisplaySwitch.isChecked)
+        overlayDisplaySwitch.setOnCheckedChangeListener { _, checked ->
+            Prefs.setUseOverlayDisplay(this, checked)
+            updateOverlayDisplayNote(checked)
         }
 
         refreshButton.setOnClickListener { checkStatus(forceCheck = true) }
@@ -337,6 +348,23 @@ class MainActivity : AppCompatActivity() {
         } else {
             "Off: DeX decides for itself, which is what its minimize and show-desktop need. " +
                 "If apps open fullscreen with no window controls, turn this back on."
+        }
+    }
+
+    /**
+     * Says what the display switch costs, since the on position is visibly worse in
+     * one way (a preview window appears on the phone's own screen) and the thing it
+     * is trying to buy is not guaranteed.
+     */
+    private fun updateOverlayDisplayNote(overlay: Boolean) {
+        overlayDisplayNote.text = if (overlay) {
+            "On: the system creates the display and LocalDex mirrors it. This is the " +
+                "attempt at making DeX's own taskbar, minimize and show-desktop behave " +
+                "as they do on a monitor. A small preview window appears on the phone " +
+                "screen while a session runs. Takes effect next session."
+        } else {
+            "Off: LocalDex creates the display itself — no preview window, and nothing " +
+                "device-wide is changed. DeX's own taskbar buttons stay inert."
         }
     }
 

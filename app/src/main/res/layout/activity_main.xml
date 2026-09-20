@@ -287,6 +287,37 @@
                 android:textSize="12sp" />
         </LinearLayout>
 
+        <!--
+            The other experiment, and the bigger one: who creates the display.
+            Off, scrcpy creates a VirtualDisplay this app owns. On, the system
+            creates the display itself and this app only mirrors it, which is a
+            different kind of display as far as the rest of the framework is
+            concerned. See Prefs.getUseOverlayDisplay.
+        -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:layout_marginBottom="20dp">
+
+            <com.google.android.material.switchmaterial.SwitchMaterial
+                android:id="@+id/overlayDisplaySwitch"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:minHeight="48dp"
+                android:textAllCaps="false"
+                android:textSize="15sp"
+                android:textColor="@color/on_surface"
+                android:text="Use a system display (experimental)" />
+
+            <TextView
+                android:id="@+id/overlayDisplayNote"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textColor="@color/on_surface_variant"
+                android:textSize="12sp" />
+        </LinearLayout>
+
         <com.google.android.material.button.MaterialButton
             android:id="@+id/startButton"
             android:layout_width="match_parent"

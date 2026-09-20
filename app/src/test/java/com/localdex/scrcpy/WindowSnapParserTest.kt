@@ -2,6 +2,7 @@ package com.localdex.scrcpy
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -320,5 +321,84 @@ class WindowSnapParserTest {
     @Test
     fun `isMaximized is false for a display with no size yet`() {
         assertFalse(WindowSnapParser.isMaximized(WindowSnapParser.Bounds(0, 0, 1920, 1440), 0, 0))
+    }
+
+    // --- overlay display lookup -------------------------------------------------
+
+    /** Shape of a One UI `dumpsys display` once overlay_display_devices is set. */
+    private val dumpsysDisplayWithOverlay = """
+        DISPLAY MANAGER (dumpsys display)
+          mOnlyCore=false
+          Display Devices: size=2
+            DisplayDeviceInfo{"Built-in Screen": uniqueId="local:4619827259835644672", 1080 x 2340}
+            DisplayDeviceInfo{"Overlay #1: 1920x1440, 240 dpi": uniqueId="overlay:1", 1920 x 1440}
+          Logical Displays: size=2
+            Display 0:
+              mDisplayId=0
+              mBaseDisplayInfo=DisplayInfo{"Built-in Screen", displayId 0, displayGroupId 0, FLAG_TRUSTED, real 1080 x 2340}
+              mPrimaryDisplayDevice=Built-in Screen
+            Display 2:
+              mDisplayId=2
+              mBaseDisplayInfo=DisplayInfo{"Overlay #1: 1920x1440, 240 dpi", displayId 2, displayGroupId 0, FLAG_PRESENTATION, real 1920 x 1440}
+              mPrimaryDisplayDevice=Overlay #1: 1920x1440, 240 dpi
+    """.trimIndent()
+
+    @Test
+    fun `finds the overlay display id`() {
+        assertEquals(2, WindowSnapParser.parseOverlayDisplayId(dumpsysDisplayWithOverlay))
+    }
+
+    @Test
+    fun `overlay display id is null before the display exists`() {
+        // What the very first poll sees: the setting is written but the system has
+        // not created the device yet, which is why the lookup retries at all.
+        val noOverlay = """
+            DISPLAY MANAGER (dumpsys display)
+              Logical Displays: size=1
+                Display 0:
+                  mDisplayId=0
+                  mBaseDisplayInfo=DisplayInfo{"Built-in Screen", displayId 0, displayGroupId 0, real 1080 x 2340}
+                  mPrimaryDisplayDevice=Built-in Screen
+        """.trimIndent()
+        assertNull(WindowSnapParser.parseOverlayDisplayId(noOverlay))
+    }
+
+    @Test
+    fun `overlay display id never picks the built-in screen`() {
+        // The failure that would matter most: mirroring display 0 would put the
+        // phone's own screen inside the viewer, which looks like a working session.
+        assertNotEquals(0, WindowSnapParser.parseOverlayDisplayId(dumpsysDisplayWithOverlay))
+    }
+
+    @Test
+    fun `falls back to mPrimaryDisplayDevice when no DisplayInfo name is printed`() {
+        val olderFormat = """
+            Logical Displays: size=2
+              Display 0:
+                mDisplayId=0
+                mPrimaryDisplayDevice=Built-in Screen
+              Display 5:
+                mDisplayId=5
+                mPrimaryDisplayDevice=Overlay #1: 1920x1440, 240 dpi
+        """.trimIndent()
+        assertEquals(5, WindowSnapParser.parseOverlayDisplayId(olderFormat))
+    }
+
+    @Test
+    fun `overlay lookup is not fooled by the uniqueId of a display device`() {
+        // uniqueId="overlay:1" is printed in the Display Devices section, which
+        // carries no logical display id. Matching it there would attach the word
+        // "overlay" to whatever id happened to be in scope.
+        val devicesOnly = """
+            Display Devices: size=2
+              DisplayDeviceInfo{"Built-in Screen": uniqueId="local:46198", 1080 x 2340}
+              DisplayDeviceInfo{"Some Screen": uniqueId="overlay:1", 1920 x 1440}
+            Logical Displays: size=1
+              Display 0:
+                mDisplayId=0
+                mBaseDisplayInfo=DisplayInfo{"Built-in Screen", displayId 0, real 1080 x 2340}
+                mPrimaryDisplayDevice=Built-in Screen
+        """.trimIndent()
+        assertNull(WindowSnapParser.parseOverlayDisplayId(devicesOnly))
     }
 }

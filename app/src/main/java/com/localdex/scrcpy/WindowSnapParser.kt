@@ -148,6 +148,46 @@ internal object WindowSnapParser {
         else lines.joinToString("\n")
     }
 
+    // Two ways the same fact is printed, because which one a build gives varies.
+    // The logical-display dump carries a DisplayInfo whose quoted name is the
+    // device's own ("Overlay #1: 1920x1440, 240 dpi") followed by its id; older
+    // dumps instead name the backing device on a separate line inside a block that
+    // has already printed mDisplayId.
+    private val DISPLAY_INFO_NAMED = Regex("""DisplayInfo\{"([^"]*)",\s*displayId (\d+)""")
+    private val DISPLAY_ID_LINE = Regex("""^\s*mDisplayId=(\d+)""")
+    private val PRIMARY_DISPLAY_DEVICE = Regex("""^\s*mPrimaryDisplayDevice=(.*)""")
+    private val OVERLAY_NAME = Regex("""(?i)\boverlay\b""")
+
+    /**
+     * The logical display id of the display created by `overlay_display_devices`,
+     * from `dumpsys display`, or null if there isn't one yet.
+     *
+     * An overlay display is made by the system's own OverlayDisplayAdapter rather
+     * than being a VirtualDisplay this app owns, so nothing hands us its id — it has
+     * to be read back off the device after the setting is written, and it does not
+     * appear instantly.
+     *
+     * Matches on the display's *name* rather than on `uniqueId="overlay:1"`: the
+     * unique id is printed for the display device, which is a different section from
+     * the logical display that actually carries the id we need.
+     */
+    fun parseOverlayDisplayId(dumpsysDisplay: String): Int? {
+        for (match in DISPLAY_INFO_NAMED.findAll(dumpsysDisplay)) {
+            if (OVERLAY_NAME.containsMatchIn(match.groupValues[1])) {
+                return match.groupValues[2].toIntOrNull()
+            }
+        }
+        // Fallback: mDisplayId is printed before mPrimaryDisplayDevice within a
+        // block, so the last id seen is the one this device belongs to.
+        var lastId: Int? = null
+        for (line in dumpsysDisplay.lineSequence()) {
+            DISPLAY_ID_LINE.find(line)?.let { lastId = it.groupValues[1].toIntOrNull() }
+            val device = PRIMARY_DISPLAY_DEVICE.find(line) ?: continue
+            if (OVERLAY_NAME.containsMatchIn(device.groupValues[1])) return lastId
+        }
+        return null
+    }
+
     private fun parseBounds(groups: List<String>): Bounds? {
         val left = groups.getOrNull(3)?.toIntOrNull() ?: return null
         val top = groups.getOrNull(4)?.toIntOrNull() ?: return null

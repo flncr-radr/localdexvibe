@@ -64,8 +64,58 @@ object Diagnostics {
         }
 
         appendLine()
+        appendLine("-- Desktop mode state --")
+        appendLine(desktopModeState(context))
+
+        appendLine()
         appendLine("-- Recent logs (this app only) --")
         appendLine(recentLogs())
+    }
+
+    /**
+     * What the device thinks about desktop mode, independent of whether LocalDex
+     * has a session of its own.
+     *
+     * This exists to be compared against a *working* DeX rather than read alone.
+     * Another on-device DeX app is installed on the reporting device, and its DeX
+     * behaves fully — taskbar tracking running apps, minimize keeping the icon,
+     * show-desktop working — where LocalDex's gets only the chrome. Everything
+     * plain-framework works on our display and everything needing DeX's own
+     * session state does not, which points at the device never actually entering
+     * DeX mode for it. Capturing this while the other app's desktop is up, and
+     * again while LocalDex's is, should show what differs instead of guessing.
+     *
+     * Deliberately greps rather than dumping wholesale: `settings list` and
+     * `dumpsys display` are enormous, and a report nobody reads is worth nothing.
+     */
+    private suspend fun desktopModeState(context: Context): String {
+        val probes = listOf(
+            "settings/global" to "settings list global",
+            "settings/system" to "settings list system",
+            "settings/secure" to "settings list secure",
+        )
+        return buildString {
+            for ((label, command) in probes) {
+                val out = Adb.runShellCommand(context, "$command | grep -iE 'dex|desktop'")
+                    .getOrElse { "(failed: ${it.message})" }
+                    .trim()
+                appendLine("[$label] ${out.ifEmpty { "(nothing matched)" }}")
+            }
+            val services = Adb.runShellCommand(context, "service list | grep -iE 'dex|desktop'")
+                .getOrElse { "(failed: ${it.message})" }
+                .trim()
+            appendLine("[services] ${services.ifEmpty { "(nothing matched)" }}")
+
+            // Every display with its root tasks, so a working DeX display can be
+            // compared against ours side by side in one capture.
+            val tasks = Adb.runShellCommand(
+                context,
+                "dumpsys activity activities | grep -E 'Display #|type=(home|standard|recents)'"
+            ).getOrElse { "(failed: ${it.message})" }.trim()
+            appendLine()
+            appendLine("[tasks, all displays]")
+            append(tasks.ifEmpty { "(nothing matched)" })
+        }
     }
 
     /**

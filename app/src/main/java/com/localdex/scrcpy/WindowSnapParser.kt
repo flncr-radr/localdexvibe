@@ -16,6 +16,13 @@ internal object WindowSnapParser {
     private val CURRENT_FOCUS_NULL = Regex("""^\s*mCurrentFocus=null\s*$""")
 
     private val ROOT_TASK_HEADER = Regex("""^\s*RootTask id=\d+ .*displayId=(\d+)""")
+
+    // Printed on each root task's configuration line, between its header and its
+    // child task lines. Only "standard" is an app window: the DeX display always
+    // also carries a "home" task (SecondaryLauncher) and, once opened, a "recents"
+    // one (the desktop selector), and neither is ever something to snap.
+    private val ACTIVITY_TYPE = Regex("""\bmActivityType=(\w+)""")
+    private const val ACTIVITY_TYPE_STANDARD = "standard"
     private val CHILD_TASK_LINE =
         Regex("""^\s*taskId=(\d+): (\S+)(?: bounds=\[(-?\d+),(-?\d+)]\[(-?\d+),(-?\d+)])?""")
     private val VISIBLE_FLAG = Regex("""\bvisible=(true|false)\b""")
@@ -58,6 +65,15 @@ internal object WindowSnapParser {
      * display's own focus can legitimately be unknown at that moment. When the hint
      * doesn't resolve, the display's single visible task — and failing that, its
      * single task of any kind — is unambiguous enough to act on.
+     *
+     * Only `mActivityType=standard` root tasks are considered at all. The DeX
+     * display always carries a home task (SecondaryLauncher) as well, and once the
+     * desktop selector has been opened a recents task too, and counting those broke
+     * this both ways on a real device: the visible-task fallback never fired,
+     * because home and recents were two visible candidates rather than one
+     * ("No task to move on display 23"), and the hint matched the launcher's own
+     * package, so a focused desktop would have snapped the launcher or the
+     * selector instead of an app.
      */
     fun parseFocusedTask(
         amStackList: String,
@@ -65,10 +81,22 @@ internal object WindowSnapParser {
         focusedPackage: String?,
     ): TaskWindow? {
         var currentDisplay: Int? = null
+        var currentActivityType: String? = null
         val candidates = mutableListOf<TaskWindow>()
         for (line in amStackList.lineSequence()) {
-            ROOT_TASK_HEADER.find(line)?.let { currentDisplay = it.groupValues[1].toIntOrNull() }
+            val header = ROOT_TASK_HEADER.find(line)
+            if (header != null) {
+                currentDisplay = header.groupValues[1].toIntOrNull()
+                // Reset rather than carry over: the type belongs to this root task,
+                // and its configuration line has not been read yet.
+                currentActivityType = null
+            }
             if (currentDisplay != displayId) continue
+            val typeMatch = ACTIVITY_TYPE.find(line)
+            if (typeMatch != null) currentActivityType = typeMatch.groupValues[1]
+            // Unknown type is allowed through, so a build that prints no
+            // mActivityType degrades to the old behaviour rather than to nothing.
+            if (currentActivityType != null && currentActivityType != ACTIVITY_TYPE_STANDARD) continue
             val match = CHILD_TASK_LINE.find(line) ?: continue
             val taskId = match.groupValues[1].toIntOrNull() ?: continue
             val component = match.groupValues[2]

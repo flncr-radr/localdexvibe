@@ -41,6 +41,64 @@ class WindowSnapParserTest {
           taskId=37: com.example/com.example.MainActivity bounds=[100,80][1400,1100] userId=0 visible=true topActivity=ComponentInfo{com.example/com.example.MainActivity}
     """.trimIndent()
 
+    /**
+     * Verbatim from a device (display 23, One UI on Android 17), trimmed only in
+     * the configuration lines' irrelevant middles. Three root tasks, in the order
+     * the device printed them: the desktop selector (recents), the DeX launcher
+     * (home), and the one actual app window. Written from real output rather than
+     * from memory on purpose — a fixture invented to match the parser is how an
+     * earlier bug in this file got validated instead of caught.
+     */
+    private val dexDisplayStackList = """
+        RootTask id=1013 bounds=[47,47][1437,1097] displayId=23 userId=0
+         configuration={0.8 515mcc2mnc ldltr 240dpi lrg land winConfig={ mBounds=Rect(47, 47 - 1437, 1097) mWindowingMode=freeform mActivityType=recents mAlwaysOnTop=on mRotation=ROTATION_0} s.6921}
+          taskId=1013: com.sec.android.app.launcher/com.android.quickstep.RecentsActivity bounds=[47,47][1437,1097] userId=0 visible=true topActivity=ComponentInfo{com.sec.android.app.launcher/com.android.quickstep.RecentsActivity}
+        RootTask id=1010 bounds=[0,0][1920,1440] displayId=23 userId=0
+         configuration={0.8 515mcc2mnc ldltr 240dpi xlrg land winConfig={ mBounds=Rect(0, 0 - 1920, 1440) mWindowingMode=fullscreen mActivityType=home mAlwaysOnTop=undefined mRotation=ROTATION_0} s.6921}
+          taskId=1011: com.sec.android.app.launcher/com.honeyspace.dexservice.SecondaryLauncher bounds=[0,0][1920,1440] userId=0 visible=true topActivity=ComponentInfo{com.sec.android.app.launcher/com.honeyspace.dexservice.SecondaryLauncher}
+        RootTask id=1012 bounds=[288,216][1632,1224] displayId=23 userId=0
+         configuration={0.8 515mcc2mnc ldltr 240dpi lrg land winConfig={ mBounds=Rect(288, 216 - 1632, 1224) mWindowingMode=freeform mActivityType=standard mAlwaysOnTop=off mRotation=ROTATION_0} s.6921}
+          taskId=1012: com.android.chrome/com.google.android.apps.chrome.Main bounds=[288,216][1632,1224] userId=0 visible=false
+    """.trimIndent()
+
+    @Test
+    fun `parseFocusedTask ignores the home and recents tasks when falling back`() {
+        // The device logged "No task to move on display 23" here: home and recents
+        // were two visible candidates, so singleOrNull matched neither.
+        val task = WindowSnapParser.parseFocusedTask(dexDisplayStackList, 23, focusedPackage = null)
+        assertEquals(1012, task?.taskId)
+        assertEquals("com.android.chrome/com.google.android.apps.chrome.Main", task?.component)
+    }
+
+    @Test
+    fun `parseFocusedTask does not snap the launcher when the desktop has focus`() {
+        // Both the home task and the selector are com.sec.android.app.launcher, so
+        // the hint alone would have matched one of them and moved the wrong window.
+        val task = WindowSnapParser.parseFocusedTask(
+            dexDisplayStackList, 23, focusedPackage = "com.sec.android.app.launcher"
+        )
+        assertEquals(1012, task?.taskId)
+    }
+
+    @Test
+    fun `parseFocusedTask still honours the hint for a real app`() {
+        val task = WindowSnapParser.parseFocusedTask(
+            dexDisplayStackList, 23, focusedPackage = "com.android.chrome"
+        )
+        assertEquals(1012, task?.taskId)
+    }
+
+    @Test
+    fun `parseFocusedTask keeps working when no activity type is printed`() {
+        // Older or other builds may not print mActivityType; an unknown type must
+        // degrade to the previous behaviour rather than filter everything out.
+        val noTypes = dexDisplayStackList.lines()
+            .filterNot { it.contains("mActivityType=") }
+            .joinToString("\n")
+        val task = WindowSnapParser.parseFocusedTask(noTypes, 23, focusedPackage = "com.android.chrome")
+        assertEquals(1012, task?.taskId)
+    }
+
     // -- displaySection ------------------------------------------------------------
 
     @Test

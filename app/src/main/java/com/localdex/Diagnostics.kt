@@ -82,8 +82,10 @@ object Diagnostics {
             .getOrElse { return "(could not list tasks: ${it.message})" }
         val types = Adb.runShellCommand(
             context,
-            "dumpsys activity activities | grep -E " +
-                "'Display #|RootTask id=|ACTIVITY_TYPE_HOME|type=home'"
+            // 'type=' rather than 'type=home': the first cut of this matched only
+            // home tasks, so the app window and the desktop selector — the two
+            // actually in question — were filtered out of the report.
+            "dumpsys activity activities | grep -E 'Display #|RootTask id=|type='"
         ).getOrDefault("")
         return buildString {
             appendLine(WindowSnapParser.displaySection(stack, displayId))

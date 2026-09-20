@@ -3,6 +3,7 @@ package com.localdex.scrcpy
 import android.util.Log
 import com.localdex.Adb
 import io.github.muntashirakon.adb.AbsAdbConnectionManager
+import kotlinx.coroutines.delay
 
 /**
  * Moves the focused window on a DeX display between fullscreen and a bounded
@@ -38,6 +39,17 @@ object WindowSnap {
     /** A restored window's size, as a fraction of the display. */
     private const val RESTORED_SIZE = 0.7f
 
+    /**
+     * How long to wait before re-reading the task list once, when the first read
+     * turns up nothing. A device logged "No task to move" 0.94s after its own
+     * maximize had just moved that very window, with the window plainly on
+     * screen — consistent with the task being mid-transition between windowing
+     * modes and briefly not listed under the display. This is a mitigation for
+     * that, not a diagnosis of it: when the retry fails too, the log now carries
+     * what was actually on the display so the next occurrence explains itself.
+     */
+    private const val TASK_LOOKUP_RETRY_DELAY_MS = 450L
+
     enum class Direction {
         LEFT,
         RIGHT,
@@ -61,20 +73,7 @@ object WindowSnap {
         displayHeight: Int,
         direction: Direction,
     ): Result {
-        // A hint, not a requirement: this app's own window holds focus while its
-        // button is being tapped, so the DeX display's focus is often unknown here.
-        val focusedPackage = WindowSnapParser.parseFocusedPackage(
-            Adb.runShell(manager, "dumpsys window displays"), displayId
-        )
-        Log.i(TAG, "focused package on display $displayId: ${focusedPackage ?: "(unknown)"}")
-
-        val task = WindowSnapParser.parseFocusedTask(
-            Adb.runShell(manager, "am stack list"), displayId, focusedPackage
-        )
-        if (task == null) {
-            Log.w(TAG, "No task to move on display $displayId (focus hint: $focusedPackage)")
-            return Result.NO_MATCHING_TASK
-        }
+        val task = findTask(manager, displayId) ?: return Result.NO_MATCHING_TASK
 
         val resolved = if (direction == Direction.TOGGLE) {
             if (WindowSnapParser.isMaximized(task.bounds, displayWidth, displayHeight)) {
@@ -101,6 +100,45 @@ object WindowSnap {
                 "${bounds.left} ${bounds.top} ${bounds.right} ${bounds.bottom}"
         )
         return Result.MOVED
+    }
+
+    /**
+     * The task to act on, re-read once if the first look finds nothing. Both the
+     * focus hint and the task list are re-read on the retry, since a window that
+     * is mid-transition can be missing from either.
+     */
+    private suspend fun findTask(
+        manager: AbsAdbConnectionManager,
+        displayId: Int,
+    ): WindowSnapParser.TaskWindow? {
+        repeat(2) { attempt ->
+            // A hint, not a requirement: this app's own window holds focus while
+            // its button is being tapped, so the DeX display's focus is often
+            // unknown here.
+            val focusedPackage = WindowSnapParser.parseFocusedPackage(
+                Adb.runShell(manager, "dumpsys window displays"), displayId
+            )
+            Log.i(TAG, "focused package on display $displayId: ${focusedPackage ?: "(unknown)"}")
+
+            val stack = Adb.runShell(manager, "am stack list")
+            val task = WindowSnapParser.parseFocusedTask(stack, displayId, focusedPackage)
+            if (task != null) return task
+
+            if (attempt == 0) {
+                Log.i(TAG, "Nothing on display $displayId yet; re-reading once")
+                delay(TASK_LOOKUP_RETRY_DELAY_MS)
+            } else {
+                // Says what it saw, not just that it saw nothing: the previous
+                // version of this log could only report the failure, which left
+                // no way to tell a transition race from a parsing miss.
+                Log.w(
+                    TAG,
+                    "No task to move on display $displayId (focus hint: $focusedPackage). " +
+                        "That display held:\n${WindowSnapParser.displaySection(stack, displayId)}"
+                )
+            }
+        }
+        return null
     }
 
     private suspend fun setWindowingMode(

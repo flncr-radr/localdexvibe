@@ -1,0 +1,198 @@
+package com.localdex.scrcpy
+
+import android.util.Log
+import com.localdex.Adb
+import io.github.muntashirakon.adb.AbsAdbConnectionManager
+import kotlinx.coroutines.delay
+
+/**
+ * Moves the focused window on a DeX display between fullscreen and a bounded
+ * (freeform) window. Android's desktop-windowing docs describe only drag
+ * gestures for this, so it's driven here with `am` shell commands instead.
+ *
+ * Why this isn't just `am task resize`: that call is a **silent no-op on a
+ * maximized window**. ActivityTaskManagerService.resizeTask bails out early on
+ * `!task.getWindowConfiguration().canResizeTask()`, and canResizeTask() is
+ * `mWindowingMode == WINDOWING_MODE_FREEFORM || mWindowingMode ==
+ * WINDOWING_MODE_MULTI_WINDOW` — so a fullscreen task rejects every resize,
+ * logging "resizeTask not allowed on task=" server-side and changing nothing.
+ * Bounds alone can never un-maximize a window; the *windowing mode* has to
+ * change first. That's what an earlier version of this file got wrong.
+ *
+ * The windowing mode is changed with `am start --task <id> --windowingMode
+ * <mode>`, which routes through ActivityOptions.setLaunchTaskId /
+ * setLaunchWindowingMode against the task that already exists, rather than
+ * starting anything new. Bounds are then applied with `am task resize`, which
+ * is legal once the task is freeform.
+ *
+ * Commands and their output formats were verified against AOSP source
+ * (ActivityManagerShellCommand, ActivityTaskManagerService, WindowConfiguration,
+ * DisplayContent.dump, ActivityTaskManager.RootTaskInfo.toString).
+ */
+object WindowSnap {
+    private const val TAG = "WindowSnap"
+
+    /** From WindowConfiguration: the windowing modes `am start --windowingMode` takes. */
+    private const val WINDOWING_MODE_FULLSCREEN = 1
+    private const val WINDOWING_MODE_FREEFORM = 5
+
+    /** A restored window's size, as a fraction of the display. */
+    private const val RESTORED_SIZE = 0.7f
+
+    /**
+     * How long to wait before re-reading the task list once, when the first read
+     * turns up nothing. A device logged "No task to move" 0.94s after its own
+     * maximize had just moved that very window, with the window plainly on
+     * screen — consistent with the task being mid-transition between windowing
+     * modes and briefly not listed under the display. This is a mitigation for
+     * that, not a diagnosis of it: when the retry fails too, the log now carries
+     * what was actually on the display so the next occurrence explains itself.
+     */
+    private const val TASK_LOOKUP_RETRY_DELAY_MS = 450L
+
+    enum class Direction {
+        LEFT,
+        RIGHT,
+        MAXIMIZE,
+        RESTORE,
+
+        /** Maximize a restored window, restore a maximized one. */
+        TOGGLE,
+    }
+
+    /** What [snap] did, so callers can tell the user when nothing happened. */
+    enum class Result {
+        MOVED,
+        NO_MATCHING_TASK,
+    }
+
+    suspend fun snap(
+        manager: AbsAdbConnectionManager,
+        displayId: Int,
+        displayWidth: Int,
+        displayHeight: Int,
+        direction: Direction,
+    ): Result {
+        val task = findTask(manager, displayId) ?: return Result.NO_MATCHING_TASK
+
+        val resolved = if (direction == Direction.TOGGLE) {
+            if (WindowSnapParser.isMaximized(task.bounds, displayWidth, displayHeight)) {
+                Direction.RESTORE
+            } else {
+                Direction.MAXIMIZE
+            }
+        } else {
+            direction
+        }
+        Log.i(TAG, "task=${task.taskId} ${task.component} bounds=${task.bounds} -> $resolved")
+
+        if (resolved == Direction.MAXIMIZE) {
+            setWindowingMode(manager, task, displayId, WINDOWING_MODE_FULLSCREEN)
+            return Result.MOVED
+        }
+
+        // Freeform first, then bounds — the order the resizeTask guard requires.
+        setWindowingMode(manager, task, displayId, WINDOWING_MODE_FREEFORM)
+        val bounds = boundsFor(resolved, displayWidth, displayHeight)
+        Adb.runShell(
+            manager,
+            "am task resize ${task.taskId} " +
+                "${bounds.left} ${bounds.top} ${bounds.right} ${bounds.bottom}"
+        )
+        return Result.MOVED
+    }
+
+    /**
+     * The task to act on, re-read once if the first look finds nothing. Both the
+     * focus hint and the task list are re-read on the retry, since a window that
+     * is mid-transition can be missing from either.
+     */
+    /**
+     * Every app window on [displayId], hidden ones included — a taskbar's worth of
+     * state, which DeX's own taskbar does not offer for a minimized window.
+     */
+    internal suspend fun listWindows(
+        manager: AbsAdbConnectionManager,
+        displayId: Int,
+    ): List<WindowSnapParser.TaskWindow> =
+        WindowSnapParser.parseTasks(Adb.runShell(manager, "am stack list"), displayId)
+
+    /**
+     * Brings [task] back to the front of [displayId], freeform so it returns as a
+     * window rather than filling the display. This is the same `am start --task`
+     * call the snapping uses, which minimizing does not invalidate: a minimized
+     * task keeps its bounds, so it comes back where it was.
+     */
+    internal suspend fun focusWindow(
+        manager: AbsAdbConnectionManager,
+        task: WindowSnapParser.TaskWindow,
+        displayId: Int,
+    ) {
+        setWindowingMode(manager, task, displayId, WINDOWING_MODE_FREEFORM)
+    }
+
+    private suspend fun findTask(
+        manager: AbsAdbConnectionManager,
+        displayId: Int,
+    ): WindowSnapParser.TaskWindow? {
+        repeat(2) { attempt ->
+            // A hint, not a requirement: this app's own window holds focus while
+            // its button is being tapped, so the DeX display's focus is often
+            // unknown here.
+            val focusedPackage = WindowSnapParser.parseFocusedPackage(
+                Adb.runShell(manager, "dumpsys window displays"), displayId
+            )
+            Log.i(TAG, "focused package on display $displayId: ${focusedPackage ?: "(unknown)"}")
+
+            val stack = Adb.runShell(manager, "am stack list")
+            val task = WindowSnapParser.parseFocusedTask(stack, displayId, focusedPackage)
+            if (task != null) return task
+
+            if (attempt == 0) {
+                Log.i(TAG, "Nothing on display $displayId yet; re-reading once")
+                delay(TASK_LOOKUP_RETRY_DELAY_MS)
+            } else {
+                // Says what it saw, not just that it saw nothing: the previous
+                // version of this log could only report the failure, which left
+                // no way to tell a transition race from a parsing miss.
+                Log.w(
+                    TAG,
+                    "No task to move on display $displayId (focus hint: $focusedPackage). " +
+                        "That display held:\n${WindowSnapParser.displaySection(stack, displayId)}"
+                )
+            }
+        }
+        return null
+    }
+
+    private suspend fun setWindowingMode(
+        manager: AbsAdbConnectionManager,
+        task: WindowSnapParser.TaskWindow,
+        displayId: Int,
+        mode: Int,
+    ) {
+        val reply = Adb.runShell(
+            manager,
+            "am start --task ${task.taskId} --windowingMode $mode --display $displayId " +
+                "-n ${task.component}"
+        )
+        Log.i(TAG, "windowingMode=$mode on task ${task.taskId}: ${reply.ifBlank { "(no output)" }}")
+    }
+
+    private fun boundsFor(
+        direction: Direction,
+        displayWidth: Int,
+        displayHeight: Int,
+    ): WindowSnapParser.Bounds = when (direction) {
+        Direction.LEFT -> WindowSnapParser.Bounds(0, 0, displayWidth / 2, displayHeight)
+        Direction.RIGHT ->
+            WindowSnapParser.Bounds(displayWidth / 2, 0, displayWidth, displayHeight)
+        else -> {
+            val width = (displayWidth * RESTORED_SIZE).toInt()
+            val height = (displayHeight * RESTORED_SIZE).toInt()
+            val left = (displayWidth - width) / 2
+            val top = (displayHeight - height) / 2
+            WindowSnapParser.Bounds(left, top, left + width, top + height)
+        }
+    }
+}

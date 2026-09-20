@@ -1,6 +1,11 @@
 package com.localdex
 
+import android.Manifest
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Bundle
 import android.provider.Settings
 import android.view.View
@@ -8,9 +13,13 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
+import com.google.android.material.button.MaterialButtonToggleGroup
+import com.google.android.material.switchmaterial.SwitchMaterial
 import com.localdex.scrcpy.ScrcpySession
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -22,10 +31,25 @@ class MainActivity : AppCompatActivity() {
     private lateinit var actionButton: Button
     private lateinit var refreshButton: Button
     private lateinit var configGroup: View
+    private lateinit var displaySpecPresetGroup: MaterialButtonToggleGroup
     private lateinit var displaySpecField: EditText
+    private lateinit var panelPositionGroup: MaterialButtonToggleGroup
+    private lateinit var forceFreeformSwitch: SwitchMaterial
+    private lateinit var forceFreeformNote: TextView
+    private lateinit var overlayDisplaySwitch: SwitchMaterial
+    private lateinit var overlayDisplayNote: TextView
     private lateinit var startButton: Button
     private lateinit var viewerButton: Button
     private lateinit var stopButton: Button
+    private lateinit var diagnosticsButton: Button
+
+    // Denial just means the setup checklist's notification step stays unchecked
+    // (areNotificationsEnabled() already reflects it) and pairing discovery fails
+    // gracefully (AdbMdns catches the resulting SecurityException) — nothing here
+    // needs the actual grant results, just a re-check once the dialog is gone.
+    private val requestRuntimePermissions = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { checkStatus(forceCheck = true) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -35,12 +59,55 @@ class MainActivity : AppCompatActivity() {
         actionButton = findViewById(R.id.actionButton)
         refreshButton = findViewById(R.id.refreshButton)
         configGroup = findViewById(R.id.configGroup)
+        displaySpecPresetGroup = findViewById(R.id.displaySpecPresetGroup)
         displaySpecField = findViewById(R.id.displaySpecField)
+        panelPositionGroup = findViewById(R.id.panelPositionGroup)
+        forceFreeformSwitch = findViewById(R.id.forceFreeformSwitch)
+        forceFreeformNote = findViewById(R.id.forceFreeformNote)
+        overlayDisplaySwitch = findViewById(R.id.overlayDisplaySwitch)
+        overlayDisplayNote = findViewById(R.id.overlayDisplayNote)
         startButton = findViewById(R.id.startButton)
         viewerButton = findViewById(R.id.viewerButton)
         stopButton = findViewById(R.id.stopButton)
+        diagnosticsButton = findViewById(R.id.diagnosticsButton)
 
-        displaySpecField.setText(Prefs.getDisplaySpec(this))
+        val initialSpec = Prefs.getDisplaySpec(this)
+        displaySpecField.setText(initialSpec)
+        // Reflect whatever's actually in the field: one of the named presets if it
+        // matches exactly, Custom otherwise (a previously typed value, most likely).
+        displaySpecPresetGroup.check(
+            DISPLAY_SPEC_PRESETS.entries.find { it.value == initialSpec }?.key ?: R.id.presetCustom
+        )
+        displaySpecPresetGroup.addOnButtonCheckedListener { _, checkedId, isChecked ->
+            if (!isChecked) return@addOnButtonCheckedListener
+            // presetCustom has no mapped spec; selecting it just leaves the field as
+            // it is, ready for manual editing.
+            DISPLAY_SPEC_PRESETS[checkedId]?.let { spec -> displaySpecField.setText(spec) }
+        }
+
+        val initialPanelFraction = Prefs.getPanelPositionFraction(this)
+        panelPositionGroup.check(
+            PANEL_POSITION_PRESETS.entries.find { it.value == initialPanelFraction }?.key
+                ?: R.id.panelPositionOneThird
+        )
+        panelPositionGroup.addOnButtonCheckedListener { _, checkedId, isChecked ->
+            if (!isChecked) return@addOnButtonCheckedListener
+            PANEL_POSITION_PRESETS[checkedId]?.let { fraction -> Prefs.setPanelPositionFraction(this, fraction) }
+        }
+
+        forceFreeformSwitch.isChecked = Prefs.getForceFreeform(this)
+        updateForceFreeformNote(forceFreeformSwitch.isChecked)
+        forceFreeformSwitch.setOnCheckedChangeListener { _, checked ->
+            Prefs.setForceFreeform(this, checked)
+            updateForceFreeformNote(checked)
+        }
+
+        overlayDisplaySwitch.isChecked = Prefs.getUseOverlayDisplay(this)
+        updateOverlayDisplayNote(overlayDisplaySwitch.isChecked)
+        overlayDisplaySwitch.setOnCheckedChangeListener { _, checked ->
+            Prefs.setUseOverlayDisplay(this, checked)
+            updateOverlayDisplayNote(checked)
+        }
 
         refreshButton.setOnClickListener { checkStatus(forceCheck = true) }
         startButton.setOnClickListener { startDex() }
@@ -51,6 +118,23 @@ class MainActivity : AppCompatActivity() {
             DexService.stop(this)
             statusText.postDelayed({ checkStatus() }, 500)
         }
+        diagnosticsButton.setOnClickListener { copyDiagnostics() }
+
+        ensureRuntimePermissions()
+    }
+
+    /**
+     * Requests whichever of the two runtime permissions minSdk 33 requires aren't
+     * granted yet: POST_NOTIFICATIONS (the pairing-code entry notification) and
+     * NEARBY_WIFI_DEVICES (AdbMdns's pairing-service discovery). Asked once per
+     * launch here rather than from onResume, so a denial doesn't re-prompt on
+     * every return to the app.
+     */
+    private fun ensureRuntimePermissions() {
+        val missing = RUNTIME_PERMISSIONS.filter {
+            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+        }
+        if (missing.isNotEmpty()) requestRuntimePermissions.launch(missing.toTypedArray())
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -114,11 +198,23 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showRunningState() {
-        val displayId = ScrcpySession.current?.displayId ?: -1
+        val session = ScrcpySession.current
+        val displayId = session?.displayId ?: -1
         statusText.text = if (displayId >= 0) {
-            "🖥️ DeX is running on display $displayId.\n\n" +
-                "From a computer on the same adb connection you can open the same " +
-                "desktop with:\n\nscrcpy --display-id=$displayId"
+            buildString {
+                append("🖥️ DeX is running on display $displayId.\n\n")
+                append("From a computer on the same adb connection you can open the same ")
+                append("desktop with:\n\nscrcpy --display-id=$displayId")
+                when {
+                    session?.freeformForceFailed == true -> append(
+                        "\n\n⚠️ Could not switch this display to freeform mode — apps may " +
+                            "open fullscreen with no window controls."
+                    )
+                    session?.freeformForceInProgress == true ->
+                        // The freeform result can land a moment after the display id does.
+                        statusText.postDelayed({ if (ScrcpySession.current === session) checkStatus() }, 500)
+                }
+            }
         } else {
             // The display id arrives from the server log moments after start.
             statusText.postDelayed({ if (ScrcpySession.current != null) checkStatus() }, 1000)
@@ -240,6 +336,57 @@ class MainActivity : AppCompatActivity() {
         startActivity(Intent(this, ViewerActivity::class.java))
     }
 
+    /**
+     * Says what the switch actually trades, because neither position is simply
+     * "better" and the failure mode of the off position (no windows at all) is
+     * worth knowing before a session rather than after.
+     */
+    private fun updateForceFreeformNote(forcing: Boolean) {
+        forceFreeformNote.text = if (forcing) {
+            "On: windowed apps are guaranteed, but DeX takes its legacy freeform path, " +
+                "where its own minimize and show-desktop do nothing. Takes effect next session."
+        } else {
+            "Off: DeX decides for itself, which is what its minimize and show-desktop need. " +
+                "If apps open fullscreen with no window controls, turn this back on."
+        }
+    }
+
+    /**
+     * Says what the display switch costs, since the on position is visibly worse in
+     * one way (a preview window appears on the phone's own screen) and the thing it
+     * is trying to buy is not guaranteed.
+     */
+    private fun updateOverlayDisplayNote(overlay: Boolean) {
+        overlayDisplayNote.text = if (overlay) {
+            "On: the system creates the display and LocalDex mirrors it, which does get " +
+                "DeX to engage — its taskbar lists running apps. A small preview window " +
+                "appears on the phone screen, and \"Force freeform windowing\" is ignored " +
+                "in this mode because DeX manages this display itself. Still rough: one " +
+                "device froze and restarted during a session. If a phantom display is " +
+                "left behind, Developer options > Simulate secondary displays > None " +
+                "clears it. Takes effect next session."
+        } else {
+            "Off: LocalDex creates the display itself — no preview window, and nothing " +
+                "device-wide is changed. DeX's own taskbar buttons stay inert."
+        }
+    }
+
+    /**
+     * Gathers a text diagnostics report and puts it on the clipboard. Runs on
+     * Dispatchers.IO: it does an ADB round-trip and shells out to `logcat`, neither
+     * of which belongs on the main thread.
+     */
+    private fun copyDiagnostics() {
+        diagnosticsButton.isEnabled = false
+        lifecycleScope.launch {
+            val report = withContext(Dispatchers.IO) { Diagnostics.collect(this@MainActivity) }
+            val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            clipboard.setPrimaryClip(ClipData.newPlainText("LocalDex diagnostics", report))
+            Toast.makeText(this@MainActivity, "Diagnostics copied", Toast.LENGTH_SHORT).show()
+            diagnosticsButton.isEnabled = true
+        }
+    }
+
     private fun isDeveloperOptionsEnabled(): Boolean {
         return try {
             Settings.Global.getInt(
@@ -258,5 +405,31 @@ class MainActivity : AppCompatActivity() {
 
         // Only try the self-grant once per session.
         private var permissionGrantAttempted = false
+
+        /**
+         * Named display-spec shortcuts for the preset row. Unverified on real
+         * hardware which of these actually looks best on a given screen — they're
+         * starting points, not measured values. presetCustom is deliberately
+         * unmapped: it just leaves the field open for manual entry.
+         */
+        private val DISPLAY_SPEC_PRESETS = mapOf(
+            R.id.presetCompact to "1600x1200/280",
+            R.id.presetBalanced to Prefs.DEFAULT_DISPLAY_SPEC,
+            R.id.presetSpacious to "2560x1600/220",
+        )
+
+        /** Where the viewer's exit tab sits, as a fraction of screen height up from the bottom. */
+        private val PANEL_POSITION_PRESETS = mapOf(
+            R.id.panelPositionOneThird to 1f / 3f,
+            R.id.panelPositionHalf to 1f / 2f,
+            R.id.panelPositionTwoThirds to 2f / 3f,
+        )
+
+        /** Both are runtime (dangerous) permissions on minSdk 33+ — every device
+         *  this app supports needs them requested, not just declared. */
+        private val RUNTIME_PERMISSIONS = arrayOf(
+            Manifest.permission.POST_NOTIFICATIONS,
+            Manifest.permission.NEARBY_WIFI_DEVICES,
+        )
     }
 }

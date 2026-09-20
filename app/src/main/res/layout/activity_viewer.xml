@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<androidx.coordinatorlayout.widget.CoordinatorLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/viewerRoot"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
@@ -21,14 +22,269 @@
         android:textSize="16sp"
         android:text="Starting…" />
 
-    <ImageButton
-        android:id="@+id/closeButton"
-        android:layout_width="40dp"
-        android:layout_height="40dp"
-        android:layout_gravity="top|end"
+    <!-- Toggled by the panel's Stats button; opposite corner from the exit tab so
+         neither ever overlaps the other. -->
+    <TextView
+        android:id="@+id/viewerStatsOverlay"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|start"
         android:layout_margin="12dp"
-        android:alpha="0.5"
-        android:background="@drawable/close_button_bg"
-        android:contentDescription="Stop DeX"
-        android:src="@android:drawable/ic_menu_close_clear_cancel" />
-</FrameLayout>
+        android:background="@drawable/stats_overlay_bg"
+        android:paddingHorizontal="10dp"
+        android:paddingVertical="6dp"
+        android:fontFamily="monospace"
+        android:textColor="@color/white"
+        android:textSize="12sp"
+        android:visibility="gone" />
+
+    <!--
+        Side control tab: a handle peeks from the right edge; tap it to reveal the
+        window controls and Stop, tap again to hide them. Driven directly by
+        translationX (see ViewerActivity.setupControlPanel) rather than
+        BottomSheetBehavior — that wasn't reliably collapsing on first layout.
+
+        The background lives on the handle and the button column separately, not on
+        the panel as a whole: with it on the panel, the collapsed state painted a
+        strip as tall as the whole button column, which is a lot of screen for
+        something that's only a grip. This way the collapsed tab is just the
+        handle's own 24x64dp rounded tab.
+
+        The handle is still a real touch target rather than the thin grip line
+        inside it, and ViewerActivity carves its bounds out of the system's
+        edge-swipe gesture (setSystemGestureExclusionRects) — at this edge that
+        gesture otherwise competes for the same taps and wins.
+    -->
+    <LinearLayout
+        android:id="@+id/controlPanel"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="end|center_vertical"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:clickable="true"
+        android:focusable="true">
+
+        <FrameLayout
+            android:id="@+id/controlPanelHandle"
+            android:layout_width="24dp"
+            android:layout_height="64dp"
+            android:background="@drawable/control_panel_bg">
+
+            <View
+                android:id="@+id/controlPanelGrip"
+                android:layout_width="4dp"
+                android:layout_height="28dp"
+                android:layout_gravity="center"
+                android:background="@drawable/panel_grip" />
+        </FrameLayout>
+
+        <!--
+            Scrolls rather than clips: the button column has outgrown what a phone
+            in landscape can show at once, and the bottom button is Stop — the one
+            control that must always be reachable.
+        -->
+        <ScrollView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/control_panel_bg"
+            android:scrollbars="none">
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingHorizontal="16dp"
+            android:paddingVertical="16dp">
+
+            <!-- Side by side so their positions match what they do. -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="8dp"
+                android:orientation="horizontal">
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/viewerSnapLeftButton"
+                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                    android:layout_width="0dp"
+                    android:layout_weight="1"
+                    android:layout_height="48dp"
+                    android:layout_marginEnd="8dp"
+                    android:insetTop="0dp"
+                    android:insetBottom="0dp"
+                    app:cornerRadius="12dp"
+                    app:strokeColor="@color/outline"
+                    android:textAllCaps="false"
+                    android:textSize="14sp"
+                    android:textColor="@color/on_surface"
+                    android:text="◀ Left" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/viewerSnapRightButton"
+                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                    android:layout_width="0dp"
+                    android:layout_weight="1"
+                    android:layout_height="48dp"
+                    android:insetTop="0dp"
+                    android:insetBottom="0dp"
+                    app:cornerRadius="12dp"
+                    app:strokeColor="@color/outline"
+                    android:textAllCaps="false"
+                    android:textSize="14sp"
+                    android:textColor="@color/on_surface"
+                    android:text="Right ▶" />
+            </LinearLayout>
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/viewerRestoreButton"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:paddingHorizontal="20dp"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                app:cornerRadius="12dp"
+                app:strokeColor="@color/outline"
+                android:textAllCaps="false"
+                android:textSize="14sp"
+                android:textColor="@color/on_surface"
+                android:text="Window / Full" />
+
+            <!--
+                Stand-ins for DeX's own taskbar cluster, driven by key injection
+                (scrcpy targets those at the virtual display) rather than by the
+                mouse events this app injects for everything else. There is
+                deliberately no ≡ equivalent here — see ViewerActivity.
+            -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:orientation="horizontal">
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/viewerBackButton"
+                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                    android:layout_width="0dp"
+                    android:layout_weight="1"
+                    android:layout_height="48dp"
+                    android:layout_marginEnd="8dp"
+                    android:insetTop="0dp"
+                    android:insetBottom="0dp"
+                    app:cornerRadius="12dp"
+                    app:strokeColor="@color/outline"
+                    android:textAllCaps="false"
+                    android:textSize="14sp"
+                    android:textColor="@color/on_surface"
+                    android:text="◁ Back" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/viewerHomeButton"
+                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                    android:layout_width="0dp"
+                    android:layout_weight="1"
+                    android:layout_height="48dp"
+                    android:insetTop="0dp"
+                    android:insetBottom="0dp"
+                    app:cornerRadius="12dp"
+                    app:strokeColor="@color/outline"
+                    android:textAllCaps="false"
+                    android:textSize="14sp"
+                    android:textColor="@color/on_surface"
+                    android:text="○ Desktop" />
+            </LinearLayout>
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/viewerShortcutsButton"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:layout_marginTop="8dp"
+                android:paddingHorizontal="20dp"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                app:cornerRadius="12dp"
+                app:strokeColor="@color/outline"
+                android:textAllCaps="false"
+                android:textSize="14sp"
+                android:textColor="@color/on_surface"
+                android:text="DeX Shortcuts" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/viewerStatsButton"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:layout_marginTop="8dp"
+                android:paddingHorizontal="20dp"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                app:cornerRadius="12dp"
+                app:strokeColor="@color/outline"
+                android:textAllCaps="false"
+                android:textSize="14sp"
+                android:textColor="@color/on_surface"
+                android:text="Show Stats" />
+
+            <!--
+                DeX has no way back to a minimized window: its task survives with
+                visible=false and its bounds intact, but nothing on the taskbar
+                lists it. This is that missing taskbar.
+            -->
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/viewerWindowsButton"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:layout_marginTop="8dp"
+                android:paddingHorizontal="20dp"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                app:cornerRadius="12dp"
+                app:strokeColor="@color/outline"
+                android:textAllCaps="false"
+                android:textSize="14sp"
+                android:textColor="@color/on_surface"
+                android:text="Windows" />
+
+            <!--
+                Here as well as on the main screen: capturing a report meant leaving
+                the viewer first (swipe up for the nav bar, Home, reopen the app),
+                and the session state is exactly what the report is for.
+            -->
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/viewerDiagnosticsButton"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:layout_marginTop="8dp"
+                android:paddingHorizontal="20dp"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                app:cornerRadius="12dp"
+                app:strokeColor="@color/outline"
+                android:textAllCaps="false"
+                android:textSize="14sp"
+                android:textColor="@color/on_surface"
+                android:text="Copy Diagnostics" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/viewerStopButton"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:layout_marginTop="8dp"
+                android:paddingHorizontal="20dp"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                app:cornerRadius="12dp"
+                app:strokeColor="@color/error"
+                android:textAllCaps="false"
+                android:textSize="14sp"
+                android:textColor="@color/error"
+                android:text="Stop DeX" />
+            </LinearLayout>
+        </ScrollView>
+    </LinearLayout>
+</androidx.coordinatorlayout.widget.CoordinatorLayout>

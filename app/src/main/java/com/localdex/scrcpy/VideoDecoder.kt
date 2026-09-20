@@ -8,6 +8,7 @@ import java.io.DataInputStream
 import java.io.IOException
 import java.io.InputStream
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Reads the scrcpy v4.1 video stream and decodes it onto a [Surface].
@@ -26,11 +27,6 @@ class VideoDecoder(
 ) {
     companion object {
         private const val TAG = "VideoDecoder"
-
-        private const val CODEC_ID_H264 = 0x68323634
-        private const val FLAG_CONFIG = 1L shl 62
-
-        private const val PTS_MASK = (1L shl 61) - 1
     }
 
     @Volatile
@@ -46,9 +42,22 @@ class VideoDecoder(
     private var codec: MediaCodec? = null
     private var outputThread: Thread? = null
 
+    private val frameCount = AtomicLong(0)
+
+    /** Frames actually rendered to the surface, for the viewer's stats overlay. */
+    val framesRendered: Long get() = frameCount.get()
+
     private var videoWidth = 0
     private var videoHeight = 0
     private var needsReconfigure = false
+
+    /**
+     * Last SPS/PPS payload seen. Config packets only arrive at the start of a
+     * capture session, so if the codec has to be dropped while no surface is
+     * attached (see [usableSurfaceSnapshot]), this lets it be rebuilt once a
+     * surface returns without waiting for the server to resend one.
+     */
+    private var pendingConfigPayload: ByteArray? = null
 
     private val readerThread = Thread({ runReader() }, "localdex-video")
 
@@ -75,7 +84,19 @@ class VideoDecoder(
     /** The viewer's surface is going away; keep decoding but stop rendering. */
     fun clearSurface() {
         renderEnabled = false
+        // The Surface itself is being destroyed by the caller right after this,
+        // so drop the reference — using it later (e.g. to configure a codec on
+        // a resolution change) would throw against an already-released Surface.
+        surface = null
     }
+
+    /**
+     * A stable reference to the currently attached surface, or null if none is
+     * attached/valid right now. Callers must configure the codec against this same
+     * reference rather than re-reading [surface] later — the field can be nulled out
+     * by [clearSurface] on the UI thread at any time.
+     */
+    private fun usableSurfaceSnapshot(): Surface? = surface?.takeIf { it.isValid }
 
     fun stop() {
         running = false
@@ -92,18 +113,18 @@ class VideoDecoder(
             val dis = DataInputStream(input)
 
             val codecId = dis.readInt()
-            if (codecId != CODEC_ID_H264) {
+            if (codecId != ScrcpyProtocol.CODEC_ID_H264) {
                 throw IOException("Unexpected codec id 0x${Integer.toHexString(codecId)}")
             }
 
-            val header = ByteArray(12)
+            val header = ByteArray(ScrcpyProtocol.PACKET_HEADER_SIZE)
             while (running) {
                 dis.readFully(header)
 
-                if ((header[0].toInt() and 0x80) != 0) {
+                if (ScrcpyProtocol.isSessionPacket(header)) {
                     // Session packet: capture (re)started, possibly with a new size.
-                    val width = readInt(header, 4)
-                    val height = readInt(header, 8)
+                    val width = ScrcpyProtocol.readInt(header, 4)
+                    val height = ScrcpyProtocol.readInt(header, 8)
                     Log.i(TAG, "Video session: ${width}x$height")
                     if (videoWidth != 0 && (width != videoWidth || height != videoHeight)) {
                         needsReconfigure = true
@@ -114,26 +135,49 @@ class VideoDecoder(
                     continue
                 }
 
-                val ptsAndFlags = readLong(header, 0)
-                val size = readInt(header, 8)
-                if (size <= 0 || size > 16 * 1024 * 1024) {
+                val ptsAndFlags = ScrcpyProtocol.readLong(header, 0)
+                val size = ScrcpyProtocol.readInt(header, 8)
+                if (!ScrcpyProtocol.isPlausiblePacketSize(size)) {
                     throw IOException("Implausible packet size $size — stream out of sync")
                 }
                 val payload = ByteArray(size)
                 dis.readFully(payload)
 
-                val isConfig = (ptsAndFlags and FLAG_CONFIG) != 0L
+                val isConfig = ScrcpyProtocol.isConfigPacket(ptsAndFlags)
                 if (isConfig) {
                     // Config packets (SPS/PPS) open every capture session; this is the
                     // safe moment to (re)create the codec.
+                    pendingConfigPayload = payload
                     surfaceLatch.await()
                     if (codec == null || needsReconfigure) {
-                        recreateCodec()
-                        needsReconfigure = false
+                        val snapshot = usableSurfaceSnapshot()
+                        if (snapshot != null && recreateCodec(snapshot)) {
+                            needsReconfigure = false
+                        } else {
+                            // No surface to configure against right now (viewer
+                            // backgrounded), or it died mid-reconfigure. Drop any
+                            // stale-size codec instead of crashing; needsReconfigure
+                            // is (re)set so this is retried below once a surface
+                            // returns.
+                            releaseCodec()
+                            needsReconfigure = true
+                        }
                     }
-                    submit(payload, 0, MediaCodec.BUFFER_FLAG_CODEC_CONFIG)
-                } else if (codec != null) {
-                    submit(payload, ptsAndFlags and PTS_MASK, 0)
+                    if (codec != null) {
+                        submit(payload, 0, MediaCodec.BUFFER_FLAG_CODEC_CONFIG)
+                    }
+                } else {
+                    if (codec == null && needsReconfigure) {
+                        val config = pendingConfigPayload
+                        val snapshot = usableSurfaceSnapshot()
+                        if (config != null && snapshot != null && recreateCodec(snapshot)) {
+                            needsReconfigure = false
+                            submit(config, 0, MediaCodec.BUFFER_FLAG_CODEC_CONFIG)
+                        }
+                    }
+                    if (codec != null) {
+                        submit(payload, ScrcpyProtocol.ptsOf(ptsAndFlags), 0)
+                    }
                 }
             }
         } catch (e: Exception) {
@@ -146,16 +190,28 @@ class VideoDecoder(
         }
     }
 
-    private fun recreateCodec() {
+    /**
+     * Rebuilds the codec against [surface]. Returns false (leaving codec == null) if
+     * that surface died in the narrow window between the caller's usability check and
+     * this call — the caller retries once a fresh surface arrives.
+     */
+    private fun recreateCodec(surface: Surface): Boolean {
         releaseCodec()
 
         val format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, videoWidth, videoHeight)
         val newCodec = MediaCodec.createDecoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
-        newCodec.configure(format, surface, null, 0)
-        newCodec.start()
+        try {
+            newCodec.configure(format, surface, null, 0)
+            newCodec.start()
+        } catch (e: Exception) {
+            Log.w(TAG, "Surface became invalid while (re)creating the codec", e)
+            newCodec.release()
+            return false
+        }
         codec = newCodec
 
         outputThread = Thread({ drainOutput(newCodec) }, "localdex-video-out").also { it.start() }
+        return true
     }
 
     private fun submit(data: ByteArray, ptsUs: Long, flags: Int) {
@@ -165,6 +221,14 @@ class VideoDecoder(
             if (index >= 0) {
                 val buffer = currentCodec.getInputBuffer(index) ?: continue
                 buffer.clear()
+                if (data.size > buffer.remaining()) {
+                    // Bigger than the codec's negotiated input buffer (an unusually
+                    // large frame). Drop it rather than overflow, but still hand the
+                    // buffer back so the codec doesn't starve for input buffers.
+                    Log.w(TAG, "Dropping oversized frame: ${data.size}B > ${buffer.remaining()}B buffer")
+                    currentCodec.queueInputBuffer(index, 0, 0, ptsUs, flags)
+                    return
+                }
                 buffer.put(data)
                 currentCodec.queueInputBuffer(index, 0, data.size, ptsUs, flags)
                 return
@@ -179,7 +243,9 @@ class VideoDecoder(
                 val index = codec.dequeueOutputBuffer(info, 50_000)
                 if (index >= 0) {
                     // Render immediately: the source display is live, latency beats pacing.
-                    codec.releaseOutputBuffer(index, renderEnabled)
+                    val shouldRender = renderEnabled
+                    codec.releaseOutputBuffer(index, shouldRender)
+                    if (shouldRender) frameCount.incrementAndGet()
                 }
             }
         } catch (e: IllegalStateException) {
@@ -202,15 +268,4 @@ class VideoDecoder(
         }
     }
 
-    private fun readInt(data: ByteArray, offset: Int): Int {
-        return ((data[offset].toInt() and 0xff) shl 24) or
-            ((data[offset + 1].toInt() and 0xff) shl 16) or
-            ((data[offset + 2].toInt() and 0xff) shl 8) or
-            (data[offset + 3].toInt() and 0xff)
-    }
-
-    private fun readLong(data: ByteArray, offset: Int): Long {
-        return (readInt(data, offset).toLong() shl 32) or
-            (readInt(data, offset + 4).toLong() and 0xffffffffL)
-    }
 }
